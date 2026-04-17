@@ -2874,10 +2874,11 @@ function renderIRPF() {
   const wrap = h("div", {});
   const currentYear = new Date().getFullYear();
   const year = App.irpfYear || currentYear - 1;
-  wrap.append(pageHead("Relatório IRPF", `Ano-base ${year} — para Declaração ${year + 1}`,
+  wrap.append(pageHead("Assistente IRPF Completo", `Ano-base ${year} — Declaração ${year + 1}`,
     h("select", { class: "select", onChange: e => { App.irpfYear = +e.target.value; navigate(); }},
       ...[0,1,2,3].map(n => h("option", { value: currentYear - n, selected: (currentYear - n) === year }, currentYear - n))),
-    h("button", { class: "btn btn-outline", onClick: () => exportIrpfCsv(year) }, "⬇ Exportar CSV")
+    h("button", { class: "btn btn-outline", onClick: () => exportIrpfCsv(year) }, "⬇ CSV"),
+    h("button", { class: "btn btn-gradient", onClick: () => openIrpfSimulator(year) }, "🧮 Simular imposto")
   ));
 
   wrap.append(h("div", { class: "badge warn mb-3", style: "display:block; padding:10px" },
@@ -3724,6 +3725,222 @@ async function downloadAnnualPdf(year) {
   doc.save(`finance-ai-relatorio-${year}.pdf`);
 }
 
+/* ============ IRPF SIMULATOR ============ */
+function openIrpfSimulator(year) {
+  // Pré-preenche com dados reais
+  const yearTxs = Store.data.transactions.filter(t => t.date?.slice(0,4) === String(year) && t.amount > 0);
+  const salarios = yearTxs.filter(t => t.category_id === "cat_salary").reduce((s,t) => s+t.amount, 0);
+  const freelance = yearTxs.filter(t => t.category_id === "cat_freelance").reduce((s,t) => s+t.amount, 0);
+  const rend = salarios + freelance;
+  const saudeTxs = Store.data.transactions.filter(t =>
+    t.date?.slice(0,4) === String(year) && t.amount < 0 &&
+    Store.categoryById(t.category_id)?.group === "Saúde");
+  const saude = Math.abs(saudeTxs.reduce((s,t) => s+t.amount, 0));
+  const eduTxs = Store.data.transactions.filter(t =>
+    t.date?.slice(0,4) === String(year) && t.amount < 0 && t.category_id === "cat_education");
+  const edu = Math.abs(eduTxs.reduce((s,t) => s+t.amount, 0));
+
+  const body = h("div", {},
+    h("div", { class: "badge info mb-3", style: "display:block; padding:10px" },
+      "💡 Valores pré-preenchidos com base nos seus lançamentos. Ajuste conforme necessário."),
+    h("label", { class: "field" }, h("span", { class: "lbl" }, "Rendimento tributável anual"),
+      h("input", { id: "ir-rend", class: "input", type: "number", step: ".01", value: rend.toFixed(2) })),
+    h("label", { class: "field" }, h("span", { class: "lbl" }, "IR retido na fonte (total do ano)"),
+      h("input", { id: "ir-retido", class: "input", type: "number", step: ".01", value: "0" })),
+    h("div", { class: "font-semi mt-3 mb-2" }, "Deduções (modalidade completa)"),
+    h("div", { class: "field-row" },
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Dependentes (qtde)"),
+        h("input", { id: "ir-dep", class: "input", type: "number", min: 0, value: "0" })),
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Previdência Oficial (INSS+PGBL)"),
+        h("input", { id: "ir-prev", class: "input", type: "number", step: ".01", value: "0" }))
+    ),
+    h("div", { class: "field-row" },
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Saúde (sem teto)"),
+        h("input", { id: "ir-saude", class: "input", type: "number", step: ".01", value: saude.toFixed(2) })),
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Educação (teto R$ 3.561 por pessoa)"),
+        h("input", { id: "ir-edu", class: "input", type: "number", step: ".01", value: edu.toFixed(2) }))
+    ),
+    h("label", { class: "field" }, h("span", { class: "lbl" }, "Pensão alimentícia judicial"),
+      h("input", { id: "ir-pensao", class: "input", type: "number", step: ".01", value: "0" })),
+    h("div", { id: "ir-result", class: "mt-3" })
+  );
+
+  openModal("Simulador IR — Ano-base " + year, body, [{
+    label: "Calcular", class: "btn-gradient", onClick: () => {
+      const input = {
+        rendimentoTributavel: +$("#ir-rend").value || 0,
+        irretido: +$("#ir-retido").value || 0,
+        deducoes: {
+          dependentes: +$("#ir-dep").value || 0,
+          previdencia: +$("#ir-prev").value || 0,
+          saude: +$("#ir-saude").value || 0,
+          educacao: +$("#ir-edu").value || 0,
+          pensao: +$("#ir-pensao").value || 0
+        }
+      };
+      const r = IRPFCalc.calcularDeclaracao(input);
+      renderIrResult(r);
+    }
+  }]);
+
+  function renderIrResult(r) {
+    const el = document.getElementById("ir-result");
+    el.innerHTML = "";
+    el.appendChild(h("div", { class: "card" },
+      h("div", { class: "flex items-center justify-between mb-3" },
+        h("div", { class: "font-semi text-lg" }, r.saldo >= 0 ? "💚 Você tem restituição!" : "💸 Você tem imposto a pagar"),
+        h("div", { class: "badge " + (r.escolhida === "simplificada" ? "info" : "brand") },
+          `${r.escolhida} é melhor`)
+      ),
+      h("div", { class: "grid grid-2 mb-3" },
+        h("div", { class: "kpi accent" },
+          h("div", { class: "label" }, r.saldo >= 0 ? "Restituição" : "Imposto a pagar"),
+          h("div", { class: "value" }, fmt(Math.abs(r.saldo))),
+          h("div", { class: "delta" }, `Retido: ${fmt(r.retido)} | Devido: ${fmt(r.impostoDevido)}`)
+        ),
+        h("div", { class: "kpi" },
+          h("div", { class: "label" }, "Alíquota efetiva"),
+          h("div", { class: "value" }, r[r.escolhida].aliquotaEfetiva.toFixed(2) + "%")
+        )
+      ),
+      h("h4", { style: "font-size:13px; margin-bottom:8px" }, "Comparação"),
+      h("table", { class: "table" },
+        h("tbody", {},
+          h("tr", {},
+            h("td", { class: "font-semi" }, "Simplificada"),
+            h("td", {}, `Base: ${fmt(r.simplificada.base)}`),
+            h("td", {}, `Imposto: ${fmt(r.simplificada.imposto)}`)),
+          h("tr", {},
+            h("td", { class: "font-semi" }, "Completa"),
+            h("td", {}, `Base: ${fmt(r.completa.base)}`),
+            h("td", {}, `Imposto: ${fmt(r.completa.imposto)}`))
+        )
+      ),
+      h("div", { class: "text-xs text-muted mt-3" },
+        "⚠️ Simulação baseada na tabela 2024. Para declarar oficialmente, use os dados do informe de rendimentos no programa da Receita Federal.")
+    ));
+  }
+}
+
+/* Injeção na view IRPF: adicionar ganho de capital */
+function renderIRPFCapitalGains(year) {
+  const gains = IRPFCalc.calcularGanhoCapital(Store.investments());
+  if (!gains.length) return null;
+  const totalLucro = gains.reduce((s,g) => s + g.lucro, 0);
+  const totalImposto = gains.reduce((s,g) => s + g.imposto_potencial, 0);
+  return h("div", { class: "card mb-3" },
+    h("h3", {}, "📈 Ganho de Capital em Investimentos (potencial)"),
+    h("div", { class: "text-xs text-muted mb-3" },
+      "Valor potencial em caso de resgate total. Imposto só incide sobre venda. Ações: 15% isento até R$ 20k/mês. FIIs: 20%."),
+    h("div", { class: "table-wrap" },
+      h("table", { class: "table" },
+        h("thead", {}, h("tr", {},
+          h("th", {}, "Ativo"), h("th", {}, "Custo"), h("th", {}, "Valor atual"),
+          h("th", {}, "Lucro"), h("th", {}, "Alíquota"), h("th", {}, "IR potencial"))),
+        h("tbody", {}, ...gains.map(g => h("tr", {},
+          h("td", {}, g.ticker),
+          h("td", {}, fmt(g.custo)),
+          h("td", {}, fmt(g.valor)),
+          h("td", { class: g.lucro >= 0 ? "amt pos" : "amt neg" }, fmt(g.lucro)),
+          h("td", {}, (g.aliquota * 100).toFixed(0) + "%"),
+          h("td", {}, fmt(g.imposto_potencial))
+        )),
+        h("tr", { class: "font-bold" },
+          h("td", { colspan: 3 }, "TOTAL"),
+          h("td", { class: totalLucro >= 0 ? "amt pos" : "amt neg" }, fmt(totalLucro)),
+          h("td", {}),
+          h("td", {}, fmt(totalImposto))
+        ))
+      )
+    )
+  );
+}
+
+/* ============ CSV BULK MULTI-BANCO ============ */
+async function handleCsvBulk(files) {
+  if (!files || !files.length) return;
+  const accs = Store.accounts();
+  if (!accs.length) return alert("Crie uma conta primeiro");
+
+  const pick = prompt(
+    `${files.length} arquivo(s) selecionado(s).\n\nEm qual conta importar todos?\n` +
+    accs.map((a,i) => `${i+1}. ${a.icon} ${a.name}`).join("\n"), "1");
+  const acc = accs[(+pick || 1) - 1];
+  if (!acc) return;
+
+  showOcrProgress(`Processando ${files.length} arquivo(s)...`);
+  const reports = await CSVParser.importBulk(Array.from(files), acc.id);
+  hideOcrProgress();
+
+  const body = h("div", {},
+    h("div", { class: "text-sm mb-3" }, `Importação concluída em `, h("b", {}, acc.name)),
+    h("div", { class: "table-wrap" },
+      h("table", { class: "table" },
+        h("thead", {}, h("tr", {},
+          h("th", {}, "Arquivo"), h("th", {}, "Banco detectado"),
+          h("th", {}, "Encontradas"), h("th", {}, "Novas"), h("th", {}, "Duplicadas"))),
+        h("tbody", {}, ...reports.map(r => h("tr", {},
+          h("td", {}, r.file),
+          h("td", {}, r.error ? h("span", { class: "badge danger" }, "Erro") : r.format),
+          h("td", {}, r.total || 0),
+          h("td", { class: "amt pos" }, r.new || 0),
+          h("td", { class: "text-muted" }, r.dup || 0)
+        )))
+      )
+    )
+  );
+  openModal("Relatório de importação", body, [{
+    label: "OK", class: "btn-gradient", onClick: () => { closeModal(); navigate(); }
+  }]);
+}
+
+/* ============ BOT SECTION (Settings) ============ */
+function renderBotSection() {
+  const cfg = Store.data.settings?.channels?.telegram || {};
+  const active = window.Bot?.isConfigured();
+  return h("div", { class: "card mb-3" },
+    h("h3", {}, "🤖 Bot bidirecional (Telegram)"),
+    h("p", { class: "text-xs text-muted mb-3" },
+      "Configure o Telegram em Notificações acima. Quando ativo, você pode ", h("b", {}, "enviar e receber mensagens"), ": gasto rápido, consulta de saldo, metas, etc."),
+    active
+      ? h("div", {},
+          h("div", { class: "badge ok mb-3", style: "display:block; padding:10px" },
+            "✅ Bot ativo. Mande /ajuda no seu bot Telegram para ver os comandos."),
+          h("div", { class: "flex gap-2" },
+            h("button", { class: "btn btn-primary", onClick: async () => {
+              try {
+                await Bot.sendMessage("🧪 Teste Finance AI bot bidirecional ativo! Envie /ajuda para comandos.");
+                alert("✅ Mensagem enviada. Verifique seu Telegram.");
+              } catch (e) { alert("Erro: " + e.message); }
+            }}, "Testar envio"),
+            h("button", { class: "btn btn-outline", onClick: async () => {
+              await Bot.poll();
+              alert("✅ Polling executado. Qualquer mensagem no bot foi processada.");
+            }}, "Fazer polling agora")
+          )
+        )
+      : h("div", { class: "badge warn", style: "display:block; padding:10px" },
+          "⚠️ Configure o Telegram primeiro na seção Notificações."),
+
+    h("div", { class: "mt-4 pt-3", style: "border-top:1px solid var(--border)" },
+      h("h4", { style: "font-size:13px; margin-bottom:8px" }, "📱 WhatsApp envio rápido"),
+      h("p", { class: "text-xs text-muted mb-2" },
+        "Quer receber um resumo no seu WhatsApp agora? Cole seu número:"),
+      h("div", { class: "flex gap-2" },
+        h("input", { id: "wa-phone", class: "input", placeholder: "+5511999999999" }),
+        h("button", { class: "btn btn-outline", onClick: () => {
+          const phone = $("#wa-phone").value.trim();
+          if (!phone) return;
+          const m = Store.monthSummary();
+          const nw = Store.netWorth();
+          const msg = `*Finance AI*\n\nSaldo em contas: ${fmt(nw.breakdown.cash)}\nPatrimônio: ${fmt(nw.net)}\nReceita mês: ${fmt(m.income)}\nDespesa mês: ${fmt(m.expense)}`;
+          window.open(Bot.whatsappSendLink(phone, msg), "_blank");
+        }}, "📤 Abrir WhatsApp")
+      )
+    )
+  );
+}
+
 /* ============ BRAPI - cotações de ações brasileiras ============ */
 async function updateStockPrices() {
   const invs = Store.investments().filter(i => i.ticker && ["acoes","fii","etf"].includes(i.type));
@@ -3790,6 +4007,7 @@ window.enterApp = function() {
       Automations.attachHooks(Store);
       Automations.runDailyIfNeeded();
     }
+    if (window.Bot && Bot.isConfigured()) Bot.start();
   }, 150);
 };
 
@@ -3826,24 +4044,30 @@ window.renderInvestments = function() {
   return w;
 };
 
-// Add OFX + OCR to reconcile view
+// Add OFX + OCR + Bulk CSV to reconcile view
 const _origReconcile = renderReconcile;
 window.renderReconcile = function() {
   const w = _origReconcile();
   const card = w.querySelector(".card");
   if (card) {
     const extras = h("div", { style: "margin-top:16px; padding-top:16px; border-top:1px solid var(--border)" },
-      h("div", { class: "grid grid-2 gap-3" },
+      h("div", { class: "grid grid-3 gap-3" },
         h("div", {},
           h("div", { class: "font-semi mb-2" }, "🏛️ Arquivo OFX"),
-          h("div", { class: "text-xs text-muted mb-2" }, "Padrão brasileiro, exportado pelo internet banking"),
+          h("div", { class: "text-xs text-muted mb-2" }, "Exportado do internet banking"),
           h("input", { type: "file", accept: ".ofx,.OFX", class: "input", onChange: e => handleOfx(e.target.files[0]) })
         ),
         h("div", {},
-          h("div", { class: "font-semi mb-2" }, "📄 PDF com OCR",
+          h("div", { class: "font-semi mb-2" }, "📄 PDF + OCR",
             h("span", { class: "badge brand", style: "margin-left:6px" }, "AI")),
-          h("div", { class: "text-xs text-muted mb-2" }, "Extratos em PDF (texto ou escaneado). Rodamos OCR local com Tesseract."),
+          h("div", { class: "text-xs text-muted mb-2" }, "PDFs digitais ou escaneados"),
           h("input", { type: "file", accept: ".pdf", class: "input", onChange: e => handlePdfOcr(e.target.files[0]) })
+        ),
+        h("div", {},
+          h("div", { class: "font-semi mb-2" }, "📂 CSV em lote",
+            h("span", { class: "badge info", style: "margin-left:6px" }, "Multi-banco")),
+          h("div", { class: "text-xs text-muted mb-2" }, "Vários arquivos ao mesmo tempo. Detecta Nubank, Itaú, Bradesco, Santander, BB, Caixa, Inter, C6"),
+          h("input", { type: "file", accept: ".csv", multiple: true, class: "input", onChange: e => handleCsvBulk(e.target.files) })
         )
       )
     );
@@ -3851,6 +4075,35 @@ window.renderReconcile = function() {
   }
   return w;
 };
+
+// Adiciona ganho de capital à view IRPF
+const _origIRPF = renderIRPF;
+window.renderIRPF = function() {
+  const w = _origIRPF();
+  const year = App.irpfYear || (new Date().getFullYear() - 1);
+  const gains = renderIRPFCapitalGains(year);
+  if (gains) w.appendChild(gains);
+  return w;
+};
+
+// Adiciona Bot section ao Settings
+const _origSettings = renderSettings;
+window.renderSettings = function() {
+  const w = _origSettings();
+  // inserir antes da seção de nuvem (penúltimo card)
+  const cards = w.querySelectorAll(".card");
+  if (cards.length >= 2) {
+    w.insertBefore(renderBotSection(), cards[cards.length - 2]);
+  } else {
+    w.appendChild(renderBotSection());
+  }
+  return w;
+};
+
+// Re-wire routes after all hooks
+Object.assign(routes.reconcile, { render: renderReconcile });
+Object.assign(routes.irpf, { render: renderIRPF });
+Object.assign(routes.settings, { render: renderSettings });
 
 // Re-wire routes after hooks
 Object.assign(routes.investments, { render: renderInvestments });
