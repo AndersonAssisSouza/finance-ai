@@ -201,8 +201,13 @@ body { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; }
 </div>
 
 <script>
+/* Se estiver no GitHub Pages / produção, default = vazio (modo local puro).
+   Em localhost, default = http://localhost:8000 para usar o backend se existir. */
+const isLocalHost = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+const defaultApi = isLocalHost ? 'http://localhost:8000' : '';
+
 const state = {
-  api: localStorage.getItem('fa_api') ?? 'http://localhost:8000',
+  api: localStorage.getItem('fa_api') ?? defaultApi,
   token: localStorage.getItem('fa_token') || '',
   mode: 'login',
   charts: {},
