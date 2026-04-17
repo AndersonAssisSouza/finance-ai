@@ -73,6 +73,7 @@ const routes = {
   "cost-centers":{ title: "Centros de Custo", render: renderCostCenters, icon: "🏢" },
   "chat":        { title: "Chat IA",      render: renderChat,       icon: "🤖" },
   "settings":    { title: "Configurações",render: renderSettings,   icon: "⚙️" },
+  "import":      { title: "Importar dados", render: renderImportPage, icon: "📥" },
 };
 
 function navigate() {
@@ -265,6 +266,7 @@ function renderSidebar() {
     Store.isBusinessMode() && navItem("cost-centers"),
     navItem("chat"),
     h("div", { class: "nav-section" }, "Sistema"),
+    navItem("import"),
     navItem("settings"),
     h("button", { class: "nav-item", style: "margin-top: auto; color: var(--danger)", onClick: logout },
       h("span", { class: "ico" }, "🚪"), "Sair")
@@ -3982,6 +3984,554 @@ async function updateStockPrices() {
   } catch (e) {
     throw new Error("Brapi: " + e.message);
   }
+}
+
+/* ============ IMPORT PAGE (drag-and-drop JSON + Excel) ============ */
+function renderImportPage() {
+  const wrap = h("div", {});
+  wrap.append(pageHead("📥 Importar / Exportar dados",
+    "Suba arquivo Excel ou JSON. Baixe modelo ou exporte seus dados.",
+    h("button", { class: "btn btn-gradient", onClick: downloadExcelTemplate }, "📄 Baixar modelo Excel"),
+    h("button", { class: "btn btn-outline", onClick: exportExcelData }, "📊 Exportar dados como Excel")
+  ));
+
+  const dropArea = h("div", {
+    id: "drop-area",
+    style: `border:3px dashed var(--border); border-radius:16px; padding:60px 30px;
+            text-align:center; background:var(--bg-subtle); cursor:pointer;
+            transition:all .2s;`,
+  },
+    h("div", { style: "font-size:64px; margin-bottom:16px" }, "📁"),
+    h("div", { class: "font-semi text-lg mb-2" }, "Arraste o arquivo aqui"),
+    h("div", { class: "text-sm text-muted mb-4" }, "ou"),
+    h("button", { class: "btn btn-gradient" }, "📎 Selecionar arquivo"),
+    h("input", { type: "file", accept: ".json,.xlsx,.xls", id: "file-input", style: "display:none" }),
+    h("div", { class: "text-xs text-muted mt-4" }, "Aceita .xlsx, .xls ou .json · máx 50 MB")
+  );
+
+  const previewArea = h("div", { id: "preview-area", class: "card mt-3 hidden" });
+
+  wrap.append(dropArea, previewArea);
+
+  wrap.append(h("div", { class: "card mt-3" },
+    h("h3", {}, "📘 Como usar o Excel"),
+    h("ol", { class: "text-sm", style: "line-height:1.8; padding-left:20px" },
+      h("li", {}, h("b", {}, "Baixe o modelo Excel"), " no botão acima — vem com 5 abas e exemplos preenchidos"),
+      h("li", {}, h("b", {}, "Preencha as abas:"),
+        h("ul", { style: "padding-left:20px" },
+          h("li", {}, h("code", {}, "Contas"), " — suas contas bancárias e carteira"),
+          h("li", {}, h("code", {}, "Cartões"), " — cartões de crédito (limite, fechamento, vencimento)"),
+          h("li", {}, h("code", {}, "Transações"), " — cada lançamento (data, descrição, valor, conta)"),
+          h("li", {}, h("code", {}, "Metas"), " — objetivos financeiros"),
+          h("li", {}, h("code", {}, "Recorrências"), " — lançamentos fixos mensais (salário, aluguel)"))),
+      h("li", {}, h("b", {}, "Salve e arraste de volta"), " na área acima"),
+      h("li", {}, h("b", {}, "Confira o preview"), " e confirme a importação")
+    )
+  ));
+
+  // Drag handlers
+  setTimeout(() => {
+    const area = document.getElementById("drop-area");
+    const input = document.getElementById("file-input");
+    if (!area || !input) return;
+
+    area.onclick = () => input.click();
+    input.onchange = (e) => handleFile(e.target.files[0]);
+
+    area.ondragover = (e) => { e.preventDefault(); area.style.borderColor = "var(--brand)"; area.style.background = "rgba(99,102,241,.08)"; };
+    area.ondragleave = () => { area.style.borderColor = "var(--border)"; area.style.background = "var(--bg-subtle)"; };
+    area.ondrop = (e) => {
+      e.preventDefault();
+      area.style.borderColor = "var(--border)"; area.style.background = "var(--bg-subtle)";
+      const f = e.dataTransfer.files[0];
+      if (f) handleFile(f);
+    };
+  }, 0);
+
+  async function handleFile(file) {
+    if (!file) return;
+    const preview = document.getElementById("preview-area");
+    preview.classList.remove("hidden");
+    preview.innerHTML = "";
+    preview.appendChild(h("div", { class: "text-sm" }, "⏳ Lendo ", h("b", {}, file.name), "..."));
+
+    try {
+      let data;
+      const ext = file.name.toLowerCase().split(".").pop();
+      if (ext === "xlsx" || ext === "xls") {
+        if (!window.XLSX) throw new Error("Biblioteca XLSX não carregou. Recarregue a página.");
+        const buf = await file.arrayBuffer();
+        data = parseExcelWorkbook(XLSX.read(buf, { type: "array", cellDates: true }));
+      } else {
+        const text = await file.text();
+        data = JSON.parse(text);
+      }
+
+      const summary = {
+        accounts: (data.accounts || []).length,
+        cards: (data.cards || []).length,
+        transactions: (data.transactions || []).length,
+        goals: (data.goals || []).length,
+        recurrences: (data.recurrences || []).length,
+        categories: (data.categories || []).length,
+      };
+
+      preview.innerHTML = "";
+      preview.appendChild(
+        h("div", {},
+          h("h3", {}, "📋 Pré-visualização do arquivo"),
+          h("div", { class: "text-sm text-muted mb-3" }, "Arquivo: ", h("b", {}, file.name), ` (${(file.size/1024).toFixed(1)} KB)`),
+          h("div", { class: "grid grid-3 mb-3" },
+            kpiCard("Contas", summary.accounts),
+            kpiCard("Cartões", summary.cards),
+            kpiCard("Transações", summary.transactions, null, true),
+          ),
+          summary.goals + summary.recurrences + summary.categories > 0 && h("div", { class: "grid grid-3 mb-3" },
+            kpiCard("Metas", summary.goals),
+            kpiCard("Recorrências", summary.recurrences),
+            kpiCard("Categorias", summary.categories)
+          ),
+          h("div", { class: "badge warn mb-3", style: "display:block; padding:12px" },
+            "⚠️ A importação ", h("b", {}, "substituirá TODOS os dados atuais"),
+            " do perfil em uso. Exporte um backup antes se quiser preservar algo."),
+          h("div", { class: "flex gap-2" },
+            h("button", { class: "btn btn-gradient", onClick: () => doImport(data) },
+              "✅ Confirmar importação"),
+            h("button", { class: "btn btn-outline", onClick: () => {
+              preview.classList.add("hidden");
+              document.getElementById("file-input").value = "";
+            }}, "Cancelar"),
+            h("button", { class: "btn btn-ghost", onClick: () => {
+              const backup = Store.exportJson();
+              const blob = new Blob([backup], { type: "application/json" });
+              const a = document.createElement("a");
+              a.href = URL.createObjectURL(blob);
+              a.download = `backup-${new Date().toISOString().slice(0,10)}.json`;
+              a.click();
+            }}, "⬇ Backup atual antes"),
+          )
+        )
+      );
+    } catch (err) {
+      preview.innerHTML = "";
+      preview.appendChild(h("div", { class: "badge danger", style: "display:block; padding:14px" },
+        "❌ Erro ao ler arquivo: ", err.message));
+    }
+  }
+
+  function doImport(data) {
+    try {
+      if (!Store.currentUserId) {
+        Store.register({ email: 'eu@finance.local', password: 'local', name: 'Eu' });
+      }
+      Store.db.data[Store.currentUserId] = {
+        accounts: data.accounts || [],
+        cards: data.cards || [],
+        transactions: data.transactions || [],
+        budgets: data.budgets || [],
+        goals: data.goals || [],
+        debts: data.debts || [],
+        investments: data.investments || [],
+        rules: data.rules || [],
+        recurrences: data.recurrences || [],
+        cost_centers: data.cost_centers || [],
+        categories: data.categories && data.categories.length ? data.categories : undefined,
+        alerts: [],
+        tags: data.tags || [],
+        automations: data.automations || [],
+        settings: data.settings || { currency: 'BRL', theme: 'light', mode: 'personal' }
+      };
+      // se categorias vierem vazias, inicializa com default
+      if (!Store.db.data[Store.currentUserId].categories) {
+        Store.db.data[Store.currentUserId].categories = DEFAULT_CATEGORIES?.map(c => ({...c})) || [];
+      }
+      Store._save();
+      alert(`✅ Importação concluída!\n\n` +
+            `Contas: ${Store.accounts().length}\n` +
+            `Cartões: ${Store.cards().length}\n` +
+            `Transações: ${Store.data.transactions.length}\n` +
+            `Metas: ${Store.goals().length}\n` +
+            `Recorrências: ${Store.recurrences().length}`);
+      location.hash = '#/dashboard';
+      location.reload();
+    } catch (err) {
+      alert('❌ Erro na importação: ' + err.message);
+      console.error(err);
+    }
+  }
+
+  return wrap;
+}
+
+/* ============ EXCEL PARSER / GENERATOR ============ */
+const ACCOUNT_TYPE_MAP = {
+  "corrente": "checking", "conta corrente": "checking",
+  "poupanca": "savings", "poupança": "savings",
+  "carteira": "wallet", "dinheiro": "wallet",
+  "investimento": "investment"
+};
+function normKey(s) { return (s || "").toString().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim(); }
+function toExcelDate(d) {
+  if (!d) return "";
+  if (d instanceof Date) return d.toISOString().slice(0, 10);
+  if (typeof d === "number") {
+    // Excel serial date
+    const ms = (d - 25569) * 86400 * 1000;
+    return new Date(ms).toISOString().slice(0, 10);
+  }
+  const s = String(d).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+  if (m) {
+    const y = m[3].length === 2 ? "20" + m[3] : m[3];
+    return `${y}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+  }
+  return s;
+}
+
+function parseExcelWorkbook(wb) {
+  const out = {
+    accounts: [], cards: [], transactions: [], goals: [], recurrences: [],
+    budgets: [], debts: [], investments: [], rules: [], cost_centers: [],
+    categories: [], alerts: [], tags: [], automations: [],
+    settings: { currency: "BRL", theme: "light", mode: "personal" }
+  };
+  const sheetNames = wb.SheetNames || [];
+  const findSheet = (pattern) => sheetNames.find(n => new RegExp(pattern, "i").test(n));
+
+  // === CONTAS ===
+  const accSheet = findSheet("contas?|accounts");
+  const accIdMap = {}; // nome → id
+  if (accSheet) {
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[accSheet], { defval: "" });
+    for (const r of rows) {
+      const name = r.Nome || r.nome || r.Name;
+      if (!name) continue;
+      const tipoRaw = normKey(r.Tipo || r.tipo || r.Type || "corrente");
+      const id = "acc_" + (window.crypto?.randomUUID ? crypto.randomUUID().replace(/-/g,"").slice(0,12) : Math.random().toString(36).slice(2, 14));
+      out.accounts.push({
+        id, name: String(name).trim(),
+        type: ACCOUNT_TYPE_MAP[tipoRaw] || "checking",
+        initial_balance: num(r["Saldo inicial"] || r.saldo_inicial || 0),
+        currency: (r.Moeda || r.moeda || "BRL").toString().trim().toUpperCase(),
+        color: r.Cor || r.cor || "#6366f1",
+        icon: r.Icone || r["Ícone"] || r.icon || "🏦",
+        include_in_net_worth: true,
+        created_at: new Date().toISOString()
+      });
+      accIdMap[normKey(name)] = id;
+    }
+  }
+
+  // === CARTÕES ===
+  const cardSheet = findSheet("cart[oõ]es?|cards");
+  const cardIdMap = {};
+  if (cardSheet) {
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[cardSheet], { defval: "" });
+    for (const r of rows) {
+      const name = r.Nome || r.nome || r.Name;
+      if (!name) continue;
+      const id = "card_" + (window.crypto?.randomUUID ? crypto.randomUUID().replace(/-/g,"").slice(0,12) : Math.random().toString(36).slice(2, 14));
+      const defAccName = normKey(r["Conta padrão"] || r["Conta padrao"] || r.conta || "");
+      out.cards.push({
+        id, name: String(name).trim(),
+        limit: num(r.Limite || r.limite || 0),
+        closing_day: +r["Dia fechamento"] || +r.fechamento || 1,
+        due_day: +r["Dia vencimento"] || +r.vencimento || 10,
+        color_start: r["Cor início"] || r.cor_inicio || "#6366f1",
+        color_end: r["Cor fim"] || r.cor_fim || "#ec4899",
+        icon: "💳",
+        default_account_id: accIdMap[defAccName] || null,
+        created_at: new Date().toISOString()
+      });
+      cardIdMap[normKey(name)] = id;
+    }
+  }
+
+  // === TRANSAÇÕES ===
+  const txSheet = findSheet("transa[cç][oõ]es?|transactions|lan[çc]amentos?");
+  if (txSheet) {
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[txSheet], { defval: "" });
+    for (const r of rows) {
+      const date = toExcelDate(r.Data || r.data || r.Date);
+      const description = (r["Descrição"] || r.descricao || r.description || "").toString().trim();
+      const value = num(r.Valor || r.valor || r.value || 0);
+      if (!date || !description || value === 0) continue;
+
+      const tipoRaw = normKey(r.Tipo || r.tipo || "");
+      const type = tipoRaw === "receita" || tipoRaw === "income" || value > 0 ? "income"
+                 : tipoRaw === "transferencia" || tipoRaw === "transfer" ? "transfer" : "expense";
+      const amount = type === "expense" ? -Math.abs(value) : Math.abs(value);
+
+      const accName = normKey(r.Conta || r.conta || r.Account || "");
+      const cardName = normKey(r["Cartão"] || r.cartao || r.card || "");
+      const account_id = accIdMap[accName] || null;
+      const card_id = cardIdMap[cardName] || null;
+
+      // Auto-categoriza se não especificado
+      const catName = (r.Categoria || r.categoria || r.category || "").toString().trim();
+      let category_id = catName;
+      if (!catName.startsWith("cat_")) {
+        // Tenta achar pelo nome
+        category_id = autoCategorize(description) || "cat_other";
+      }
+
+      const tags = (r.Tags || r.tags || "").toString().split(",").map(s => s.trim()).filter(Boolean);
+
+      out.transactions.push({
+        id: "tx_" + Math.random().toString(36).slice(2, 14),
+        date, description, amount, account_id, card_id, category_id, type,
+        tags, notes: (r["Observações"] || r.obs || "").toString(),
+        created_at: new Date().toISOString()
+      });
+    }
+  }
+
+  // === METAS ===
+  const goalSheet = findSheet("metas?|goals");
+  if (goalSheet) {
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[goalSheet], { defval: "" });
+    for (const r of rows) {
+      const name = r.Nome || r.nome;
+      if (!name) continue;
+      out.goals.push({
+        id: "gol_" + Math.random().toString(36).slice(2, 14),
+        name: String(name).trim(),
+        target_amount: num(r["Valor alvo"] || r.alvo || 0),
+        current_amount: num(r["Valor atual"] || r.atual || 0),
+        monthly_contribution: num(r["Aporte mensal"] || r.aporte || 0),
+        deadline: toExcelDate(r["Data limite"] || r.deadline) || null,
+        icon: r.Icone || r["Ícone"] || "🎯",
+        color: r.Cor || r.cor || "#6366f1",
+        created_at: new Date().toISOString()
+      });
+    }
+  }
+
+  // === RECORRÊNCIAS ===
+  const recSheet = findSheet("recorr[eê]ncias?|recurrences");
+  if (recSheet) {
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[recSheet], { defval: "" });
+    for (const r of rows) {
+      const desc = r["Descrição"] || r.descricao;
+      if (!desc) continue;
+      const amount = num(r.Valor || r.valor || 0);
+      const freqRaw = normKey(r["Frequência"] || r.frequencia || "mensal");
+      const freq = { mensal: "monthly", monthly: "monthly", semanal: "weekly", weekly: "weekly", diaria: "daily", daily: "daily", anual: "yearly", yearly: "yearly" }[freqRaw] || "monthly";
+      const accName = normKey(r.Conta || r.conta || "");
+      const catName = (r.Categoria || r.categoria || "").toString().trim();
+      let category_id = catName.startsWith("cat_") ? catName : (autoCategorize(desc) || (amount >= 0 ? "cat_other_in" : "cat_other"));
+
+      out.recurrences.push({
+        id: "rec_" + Math.random().toString(36).slice(2, 14),
+        template: {
+          description: String(desc).trim(),
+          amount, category_id,
+          account_id: accIdMap[accName] || null,
+          type: amount >= 0 ? "income" : "expense"
+        },
+        frequency: freq,
+        day: +r.Dia || +r.day || new Date().getDate(),
+        start_date: toExcelDate(r["Data início"] || r.inicio || r.start_date) || new Date().toISOString().slice(0, 10),
+        end_date: toExcelDate(r["Data fim"] || r.fim || r.end_date) || null,
+        last_generated_date: null,
+        active: true,
+        created_at: new Date().toISOString()
+      });
+    }
+  }
+
+  return out;
+}
+
+/* ============ DOWNLOAD TEMPLATE EXCEL ============ */
+function downloadExcelTemplate() {
+  if (!window.XLSX) return alert("XLSX não carregou. Recarregue a página.");
+
+  const wb = XLSX.utils.book_new();
+
+  // Instruções
+  const instr = [
+    ["📘 FINANCE AI — MODELO DE IMPORTAÇÃO"],
+    [""],
+    ["COMO USAR:"],
+    ["1. Preencha as abas abaixo com seus dados"],
+    ["2. Salve o arquivo (.xlsx)"],
+    ["3. No Finance AI, vá em Importar → arraste o arquivo"],
+    [""],
+    ["REGRAS:"],
+    ["• Use VÍRGULA para decimais: 1.234,56 ou 1234,56"],
+    ["• Datas: DD/MM/AAAA ou AAAA-MM-DD"],
+    ["• Valores: positivos = receitas, negativos = despesas"],
+    ["• Conta/Cartão: deve bater com o nome cadastrado na aba Contas/Cartões"],
+    [""],
+    ["ABAS:"],
+    ["• Contas: bancos, poupança, carteira, investimentos"],
+    ["• Cartões: cartões de crédito"],
+    ["• Transações: lançamentos individuais"],
+    ["• Metas: objetivos financeiros"],
+    ["• Recorrências: lançamentos mensais fixos"],
+    [""],
+    ["DICA: Linhas de exemplo começam com '📌'. Apague-as antes de importar, ou deixe que serão ignoradas."],
+  ];
+  const wsInstr = XLSX.utils.aoa_to_sheet(instr);
+  wsInstr["!cols"] = [{ wch: 90 }];
+  XLSX.utils.book_append_sheet(wb, wsInstr, "Instruções");
+
+  // Contas
+  const contas = [
+    ["Nome", "Tipo", "Moeda", "Saldo inicial", "Cor", "Ícone"],
+    ["📌 Banco Inter", "Corrente", "BRL", 0, "#ff7a00", "🏦"],
+    ["📌 Nubank", "Corrente", "BRL", 0, "#820ad1", "💜"],
+    ["📌 Carteira", "Dinheiro", "BRL", 0, "#10b981", "💵"],
+    ["📌 Poupança Itaú", "Poupança", "BRL", 0, "#ec7000", "🐷"],
+  ];
+  const wsContas = XLSX.utils.aoa_to_sheet(contas);
+  wsContas["!cols"] = [{wch:25}, {wch:12}, {wch:8}, {wch:14}, {wch:10}, {wch:8}];
+  XLSX.utils.book_append_sheet(wb, wsContas, "Contas");
+
+  // Cartões
+  const cartoes = [
+    ["Nome", "Limite", "Dia fechamento", "Dia vencimento", "Conta padrão", "Cor início", "Cor fim"],
+    ["📌 Cartão Inter Pessoal", 18810, 1, 5, "Banco Inter", "#ff7a00", "#dc2626"],
+    ["📌 Cartão Nubank", 5000, 25, 5, "Nubank", "#820ad1", "#ec4899"],
+  ];
+  const wsCards = XLSX.utils.aoa_to_sheet(cartoes);
+  wsCards["!cols"] = [{wch:28}, {wch:10}, {wch:16}, {wch:16}, {wch:18}, {wch:12}, {wch:10}];
+  XLSX.utils.book_append_sheet(wb, wsCards, "Cartões");
+
+  // Transações
+  const txs = [
+    ["Data", "Descrição", "Valor", "Tipo", "Conta", "Cartão", "Categoria", "Tags", "Observações"],
+    ["📌 2025-05-05", "Salário Empresa X", 8500, "Receita", "Banco Inter", "", "cat_salary", "", "Via pró-labore"],
+    ["📌 2025-05-05", "Aluguel apartamento", -2200, "Despesa", "Banco Inter", "", "cat_rent", "", "Contrato anual"],
+    ["📌 2025-05-06", "Supermercado Pão Açúcar", -487.30, "Despesa", "", "Cartão Inter Pessoal", "cat_grocery", "", ""],
+    ["📌 2025-05-07", "iFood almoço", -42.90, "Despesa", "", "Cartão Inter Pessoal", "cat_delivery", "", ""],
+    ["📌 2025-05-10", "Netflix", -55.90, "Despesa", "", "Cartão Inter Pessoal", "cat_streaming", "", "Assinatura mensal"],
+    ["📌 2025-05-15", "Transferência p/ poupança", -500, "Transferência", "Banco Inter", "", "cat_transfer", "", "Meta reserva"],
+  ];
+  const wsTx = XLSX.utils.aoa_to_sheet(txs);
+  wsTx["!cols"] = [{wch:12}, {wch:30}, {wch:10}, {wch:14}, {wch:18}, {wch:22}, {wch:20}, {wch:15}, {wch:25}];
+  XLSX.utils.book_append_sheet(wb, wsTx, "Transações");
+
+  // Metas
+  const metas = [
+    ["Nome", "Valor alvo", "Valor atual", "Aporte mensal", "Data limite", "Ícone", "Cor"],
+    ["📌 Reserva de emergência", 30000, 8500, 800, "", "🛡️", "#10b981"],
+    ["📌 Viagem Europa", 20000, 2400, 600, "2027-12-31", "✈️", "#0ea5e9"],
+    ["📌 Aposentadoria FIRE", 1000000, 45000, 2000, "", "🏖️", "#f59e0b"],
+  ];
+  const wsGoals = XLSX.utils.aoa_to_sheet(metas);
+  wsGoals["!cols"] = [{wch:25}, {wch:12}, {wch:12}, {wch:14}, {wch:12}, {wch:6}, {wch:10}];
+  XLSX.utils.book_append_sheet(wb, wsGoals, "Metas");
+
+  // Recorrências
+  const rec = [
+    ["Descrição", "Valor", "Categoria", "Conta", "Frequência", "Dia", "Data início", "Data fim"],
+    ["📌 Pró-labore Empresa", 15000, "cat_prolabore", "Banco Inter", "Mensal", 8, "2025-05-08", ""],
+    ["📌 Aluguel", -2200, "cat_rent", "Banco Inter", "Mensal", 5, "2025-05-05", ""],
+    ["📌 Netflix", -55.90, "cat_streaming", "Banco Inter", "Mensal", 1, "2025-05-01", ""],
+    ["📌 Academia", -100, "cat_gym", "Banco Inter", "Mensal", 1, "2025-05-01", ""],
+  ];
+  const wsRec = XLSX.utils.aoa_to_sheet(rec);
+  wsRec["!cols"] = [{wch:26}, {wch:10}, {wch:18}, {wch:18}, {wch:12}, {wch:6}, {wch:12}, {wch:12}];
+  XLSX.utils.book_append_sheet(wb, wsRec, "Recorrências");
+
+  // Tabela de categorias (referência)
+  const catRef = [
+    ["ID (use na coluna Categoria)", "Nome", "Grupo"],
+    ...(Store.categories() || []).map(c => [c.id, c.name, c.group])
+  ];
+  const wsCatRef = XLSX.utils.aoa_to_sheet(catRef);
+  wsCatRef["!cols"] = [{wch:24}, {wch:28}, {wch:20}];
+  XLSX.utils.book_append_sheet(wb, wsCatRef, "Categorias (ref.)");
+
+  XLSX.writeFile(wb, "finance-ai-modelo.xlsx");
+}
+
+/* ============ EXPORT DADOS ATUAIS COMO EXCEL ============ */
+function exportExcelData() {
+  if (!window.XLSX) return alert("XLSX não carregou. Recarregue a página.");
+
+  const wb = XLSX.utils.book_new();
+  const accById = {};
+  Store.accounts().forEach(a => accById[a.id] = a);
+  const cardById = {};
+  Store.cards().forEach(c => cardById[c.id] = c);
+  const catById = {};
+  Store.categories().forEach(c => catById[c.id] = c);
+
+  // Contas
+  const contasData = Store.accounts().map(a => ({
+    Nome: a.name, Tipo: a.type, Moeda: a.currency,
+    "Saldo inicial": a.initial_balance, "Saldo atual": Store.accountBalance(a.id),
+    Cor: a.color, "Ícone": a.icon
+  }));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(contasData), "Contas");
+
+  // Cartões
+  const cardsData = Store.cards().map(c => ({
+    Nome: c.name, Limite: c.limit,
+    "Dia fechamento": c.closing_day, "Dia vencimento": c.due_day,
+    "Uso atual": Store.cardCurrentUsage(c.id),
+    "Conta padrão": c.default_account_id ? accById[c.default_account_id]?.name : ""
+  }));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(cardsData), "Cartões");
+
+  // Transações
+  const txsData = Store.data.transactions.map(t => ({
+    Data: t.date, "Descrição": t.description, Valor: t.amount, Tipo: t.type,
+    Conta: t.account_id ? accById[t.account_id]?.name || "" : "",
+    "Cartão": t.card_id ? cardById[t.card_id]?.name || "" : "",
+    Categoria: catById[t.category_id]?.name || t.category_id,
+    "ID Categoria": t.category_id,
+    Tags: (t.tags || []).join(", "),
+    "Observações": t.notes || ""
+  }));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(txsData), "Transações");
+
+  // Metas
+  const goalsData = Store.goals().map(g => ({
+    Nome: g.name, "Valor alvo": g.target_amount, "Valor atual": g.current_amount,
+    "Aporte mensal": g.monthly_contribution, "Data limite": g.deadline || "",
+    "Ícone": g.icon, Cor: g.color
+  }));
+  if (goalsData.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(goalsData), "Metas");
+
+  // Recorrências
+  const recData = Store.recurrences().map(r => ({
+    "Descrição": r.template.description, Valor: r.template.amount,
+    Categoria: catById[r.template.category_id]?.name || r.template.category_id,
+    Conta: r.template.account_id ? accById[r.template.account_id]?.name || "" : "",
+    "Frequência": r.frequency, Dia: r.day,
+    "Data início": r.start_date, "Data fim": r.end_date || "",
+    Ativa: r.active ? "Sim" : "Não"
+  }));
+  if (recData.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(recData), "Recorrências");
+
+  // Resumo
+  const nw = Store.netWorth();
+  const ms = Store.monthSummary();
+  const resumo = [
+    ["Resumo Financeiro - " + new Date().toLocaleDateString("pt-BR")],
+    [""],
+    ["Patrimônio líquido", nw.net],
+    ["Ativos", nw.assets],
+    ["Passivos", nw.liabilities],
+    ["Saldo em contas", nw.breakdown.cash],
+    ["Investimentos", nw.breakdown.investments],
+    ["Dívidas", nw.breakdown.debts],
+    ["Cartões em aberto", nw.breakdown.cards_open],
+    [""],
+    ["Mês atual"],
+    ["Receita", ms.income],
+    ["Despesa", ms.expense],
+    ["Saldo", ms.net]
+  ];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(resumo), "Resumo");
+
+  const dt = new Date().toISOString().slice(0, 10);
+  XLSX.writeFile(wb, `finance-ai-${dt}.xlsx`);
 }
 
 /* ============ BINDINGS GLOBAIS ============ */
