@@ -137,7 +137,13 @@ class FinanceStore {
   get data() {
     if (!this.currentUserId) return null;
     if (!this.db.data[this.currentUserId]) this.db.data[this.currentUserId] = emptyUserData();
-    return this.db.data[this.currentUserId];
+    // Garante shape completo (importações antigas podem ter campos faltando)
+    const d = this.db.data[this.currentUserId];
+    const defaults = emptyUserData();
+    for (const key of Object.keys(defaults)) {
+      if (d[key] === undefined || d[key] === null) d[key] = defaults[key];
+    }
+    return d;
   }
 
   /* === AUTH === */
@@ -480,11 +486,17 @@ class FinanceStore {
 
   addRecurrence({ template, frequency = "monthly", day = null, start_date = null, end_date = null, active = true }) {
     // template: { description, amount, category_id, account_id?, card_id?, type, tags, notes }
+    if (!template || !template.description) throw new Error("Descrição obrigatória");
+    if (typeof template.amount !== "number" || isNaN(template.amount)) throw new Error("Valor inválido");
+
+    // Garante array (import antigo pode não ter)
+    if (!Array.isArray(this.data.recurrences)) this.data.recurrences = [];
+
     const r = {
       id: uid("rec_"),
       template: { ...template },
-      frequency,         // "daily" | "weekly" | "monthly" | "yearly"
-      day: day ?? new Date().getDate(),  // dia do mês (monthly/yearly) ou dia semana (0-6, weekly)
+      frequency,
+      day: day ?? new Date().getDate(),
       start_date: start_date || today(),
       end_date: end_date || null,
       last_generated_date: null,

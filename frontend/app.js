@@ -3159,23 +3159,40 @@ function openRecurrenceModal(existing) {
   );
   openModal((existing ? "Editar" : "+ Nova") + " recorrência", body, [{
     label: "Salvar", class: "btn-gradient", onClick: () => {
+      const desc = $("#rc-desc").value.trim();
+      const amt = num($("#rc-amt").value);
+      const cat = $("#rc-cat").value;
+      const acc = $("#rc-acc").value;
+
+      // Validação explícita com feedback
+      if (!desc) return alert("⚠️ Preencha a descrição.");
+      if (!amt || amt === 0) return alert("⚠️ Valor inválido. Use vírgula para decimais (ex: 15000 ou 1500,50). Negativo = despesa.");
+      if (!cat) return alert("⚠️ Selecione uma categoria.");
+      if (!acc) return alert("⚠️ Selecione uma conta. Se não há contas, crie uma primeiro em Contas.");
+
       const payload = {
         template: {
-          description: $("#rc-desc").value,
-          amount: num($("#rc-amt").value),
-          category_id: $("#rc-cat").value,
-          account_id: $("#rc-acc").value,
-          type: num($("#rc-amt").value) >= 0 ? "income" : "expense"
+          description: desc,
+          amount: amt,
+          category_id: cat,
+          account_id: acc,
+          type: amt >= 0 ? "income" : "expense"
         },
         frequency: $("#rc-freq").value,
-        day: num($("#rc-day").value),
-        start_date: $("#rc-start").value,
+        day: num($("#rc-day").value) || 1,
+        start_date: $("#rc-start").value || new Date().toISOString().slice(0, 10),
         end_date: $("#rc-end").value || null,
         active: true
       };
-      if (existing) Store.updateRecurrence(existing.id, payload);
-      else Store.addRecurrence(payload);
-      closeModal(); navigate();
+      try {
+        if (existing) Store.updateRecurrence(existing.id, payload);
+        else Store.addRecurrence(payload);
+        closeModal();
+        navigate();
+      } catch (err) {
+        alert("❌ Erro ao salvar: " + err.message);
+        console.error("Recorrência:", err, payload);
+      }
     }
   }]);
 }
