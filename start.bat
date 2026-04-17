@@ -24,8 +24,13 @@ if not exist ".venv" (
 
 echo [2/3] Instalando dependencias...
 call .venv\Scripts\activate.bat
-pip install -q --upgrade pip
-pip install -q -r requirements.txt
+python -m pip install --upgrade pip >nul 2>&1
+python -m pip install -r requirements.txt
+if errorlevel 1 (
+  echo ERRO: falha ao instalar dependencias.
+  pause
+  exit /b 1
+)
 
 if not exist ".env" (
   echo [extra] Criando .env padrao...

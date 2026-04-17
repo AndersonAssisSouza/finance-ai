@@ -20,8 +20,8 @@ fi
 echo "[2/3] Instalando dependencias..."
 # shellcheck disable=SC1091
 source .venv/bin/activate
-pip install -q --upgrade pip
-pip install -q -r requirements.txt
+python -m pip install --upgrade pip >/dev/null 2>&1 || true
+python -m pip install -r requirements.txt
 
 if [ ! -f ".env" ]; then
   echo "[extra] Criando .env padrao..."
