@@ -4,9 +4,20 @@ Responsável por: categorização automática, detecção de recorrência,
 insights inteligentes, forecast avançado e score financeiro.
 Toda a consolidação é recalculada a cada chamada.
 """
+import unicodedata
 from collections import defaultdict
 from datetime import date, timedelta
 from statistics import mean, pstdev
+
+
+def _normalize(s: str) -> str:
+    """Lowercase + remove acentos, para comparação tolerante."""
+    if not s:
+        return ""
+    return "".join(
+        c for c in unicodedata.normalize("NFD", s.lower())
+        if unicodedata.category(c) != "Mn"
+    )
 
 
 CATEGORY_KEYWORDS = {
@@ -33,11 +44,11 @@ CATEGORY_KEYWORDS = {
 
 def categorize(description: str, amount: float, user_rules=None) -> str:
     """Categoriza uma transação. Regras do usuário têm prioridade."""
-    desc = (description or "").lower()
+    desc = _normalize(description)
 
     if user_rules:
         for rule in user_rules:
-            if rule.keyword.lower() in desc:
+            if _normalize(rule.keyword) in desc:
                 return rule.category
 
     if amount > 0:
@@ -65,7 +76,7 @@ def detect_recurring(transactions):
     """Detecta padrões de recorrência (mensal) por descrição similar."""
     groups = defaultdict(list)
     for t in transactions:
-        key = (t.description or "").lower().strip()[:20]
+        key = _normalize(t.description).strip()[:20]
         groups[key].append(t)
 
     recurring_ids = set()

@@ -6,6 +6,8 @@
 <title>Finance AI — Inteligência Financeira Pessoal</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="./ai_engine.js"></script>
+<script src="./storage.js"></script>
 <script>
 tailwind.config = {
   darkMode: 'class',
@@ -39,6 +41,9 @@ body { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; }
         <h1 class="text-2xl font-bold">Finance AI</h1>
       </div>
       <p class="text-brand-50 text-sm">Inteligência financeira com IA — categorização automática, previsões e insights.</p>
+      <div class="mt-3 flex items-center gap-2 text-xs">
+        <span id="mode-badge" class="px-2 py-0.5 rounded-full bg-white/20">detectando modo…</span>
+      </div>
     </div>
     <div class="p-8">
       <div class="flex gap-2 mb-6 bg-slate-100 dark:bg-slate-700 p-1 rounded-lg">
@@ -62,9 +67,9 @@ body { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; }
         <div id="auth-error" class="hidden text-sm text-red-600 bg-red-50 dark:bg-red-900/30 p-3 rounded-lg"></div>
       </form>
       <div class="mt-6 pt-6 border-t border-slate-200 dark:border-slate-700">
-        <label class="block text-sm font-medium mb-1">API do backend</label>
+        <label class="block text-sm font-medium mb-1">API do backend (opcional)</label>
         <input id="api-base" type="text" value="http://localhost:8000" class="w-full px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700 text-sm">
-        <p class="text-xs text-slate-500 mt-1">Aponte para o seu backend FastAPI</p>
+        <p class="text-xs text-slate-500 mt-1">Vazio = modo local (localStorage). Preenchido e disponível = modo API.</p>
       </div>
     </div>
   </div>
@@ -82,6 +87,7 @@ body { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; }
           <h1 class="font-bold">Finance AI</h1>
           <p class="text-xs text-slate-500" id="user-greeting">Olá!</p>
         </div>
+        <span id="mode-badge-header" class="hidden sm:inline-block ml-2 text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300"></span>
       </div>
       <div class="flex items-center gap-2">
         <button id="btn-demo" class="text-xs px-3 py-1.5 rounded-lg bg-amber-100 text-amber-800 hover:bg-amber-200 dark:bg-amber-900/40 dark:text-amber-200">Carregar demo</button>
@@ -123,7 +129,7 @@ body { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; }
       </div>
     </section>
 
-    <!-- Charts row -->
+    <!-- Charts -->
     <section class="grid lg:grid-cols-3 gap-4">
       <div class="lg:col-span-2 bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm">
         <div class="flex items-center justify-between mb-3">
@@ -138,7 +144,6 @@ body { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; }
       </div>
     </section>
 
-    <!-- Insights + Monthly flow -->
     <section class="grid lg:grid-cols-3 gap-4">
       <div class="lg:col-span-2 bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm">
         <h3 class="font-semibold mb-3">Fluxo mensal</h3>
@@ -150,7 +155,6 @@ body { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; }
       </div>
     </section>
 
-    <!-- Transactions + actions -->
     <section class="grid lg:grid-cols-3 gap-4">
       <div class="lg:col-span-2 bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm">
         <div class="flex items-center justify-between mb-3">
@@ -161,7 +165,6 @@ body { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; }
       </div>
 
       <div class="space-y-4">
-        <!-- Nova transação -->
         <div class="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm">
           <h3 class="font-semibold mb-3">+ Nova transação</h3>
           <form id="tx-form" class="space-y-2">
@@ -172,7 +175,6 @@ body { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; }
           </form>
         </div>
 
-        <!-- Metas -->
         <div class="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm">
           <h3 class="font-semibold mb-3">🎯 Metas</h3>
           <div id="goals-list" class="space-y-2 mb-3"></div>
@@ -183,7 +185,6 @@ body { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; }
           </form>
         </div>
 
-        <!-- Regras de automação -->
         <div class="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm">
           <h3 class="font-semibold mb-3">⚡ Regras automáticas</h3>
           <div id="rules-list" class="space-y-2 mb-3"></div>
@@ -200,30 +201,31 @@ body { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; }
 </div>
 
 <script>
-/* ============ estado global ============ */
 const state = {
-  api: localStorage.getItem('fa_api') || 'http://localhost:8000',
+  api: localStorage.getItem('fa_api') ?? 'http://localhost:8000',
   token: localStorage.getItem('fa_token') || '',
   mode: 'login',
-  charts: {}
+  charts: {},
+  store: null
 };
 
-/* ============ helpers ============ */
 const $ = (id) => document.getElementById(id);
 const fmtBRL = (v) => (v ?? 0).toLocaleString('pt-BR', {style:'currency', currency:'BRL'});
 
-async function api(path, opts = {}) {
-  const headers = { 'Content-Type': 'application/json', ...(opts.headers||{}) };
-  if (state.token) headers.Authorization = `Bearer ${state.token}`;
-  const res = await fetch(state.api + path, { ...opts, headers });
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(err || res.statusText);
-  }
-  return res.json();
+function updateModeBadge() {
+  const label = state.store?.mode === "api"
+    ? "🔌 conectado ao backend"
+    : "💾 modo local (navegador)";
+  $('mode-badge').textContent = label;
+  $('mode-badge-header').textContent = label;
 }
 
-/* ============ auth ============ */
+async function initStore() {
+  state.store = await Store.pickStore(state.api, state.token);
+  if (state.store.mode === "api" && state.token) state.store.token = state.token;
+  updateModeBadge();
+}
+
 $('tab-login').onclick = () => switchMode('login');
 $('tab-register').onclick = () => switchMode('register');
 
@@ -245,14 +247,16 @@ $('auth-form').onsubmit = async (e) => {
   $('auth-error').classList.add('hidden');
   state.api = $('api-base').value.replace(/\/$/, '');
   localStorage.setItem('fa_api', state.api);
+  await initStore();
   const body = {
     email: $('email').value,
     password: $('password').value,
     ...(state.mode === 'register' ? { name: $('name').value } : {})
   };
   try {
-    const path = state.mode === 'login' ? '/auth/login' : '/auth/register';
-    const data = await api(path, { method: 'POST', body: JSON.stringify(body) });
+    const data = state.mode === 'login'
+      ? await state.store.login(body)
+      : await state.store.register(body);
     state.token = data.token;
     localStorage.setItem('fa_token', state.token);
     await enterApp(data.user);
@@ -263,23 +267,23 @@ $('auth-form').onsubmit = async (e) => {
 };
 
 $('btn-logout').onclick = () => {
+  if (state.store) state.store.logout();
   localStorage.removeItem('fa_token');
-  state.token = '';
   location.reload();
 };
 
-/* ============ app ============ */
 async function enterApp(user) {
   $('auth-screen').classList.add('hidden');
   $('app-screen').classList.remove('hidden');
   if (user) $('user-greeting').textContent = `Olá, ${user.name || user.email}`;
+  updateModeBadge();
   await loadDashboard();
 }
 
 $('btn-refresh').onclick = loadDashboard;
 $('btn-demo').onclick = async () => {
   if (!confirm('Isso substituirá suas transações por dados de demonstração. Continuar?')) return;
-  await api('/demo', { method: 'POST' });
+  await state.store.seedDemo();
   await loadDashboard();
 };
 $('btn-theme').onclick = () => {
@@ -290,9 +294,9 @@ $('btn-theme').onclick = () => {
 async function loadDashboard() {
   try {
     const [dash, txs, rules] = await Promise.all([
-      api('/dashboard'),
-      api('/transactions?limit=50'),
-      api('/rules')
+      state.store.dashboard(),
+      state.store.listTransactions(50),
+      state.store.listRules()
     ]);
     renderKPIs(dash);
     renderCharts(dash);
@@ -302,14 +306,13 @@ async function loadDashboard() {
     renderRules(rules);
   } catch (err) {
     console.error(err);
-    if (err.message.includes('401')) {
+    if (String(err.message).includes('401')) {
       localStorage.removeItem('fa_token');
       location.reload();
     }
   }
 }
 
-/* ============ render ============ */
 function renderKPIs(d) {
   const f = d.forecast;
   $('kpi-balance').textContent = fmtBRL(f.balance);
@@ -352,11 +355,11 @@ function renderCharts(d) {
   const gridColor = isDark ? '#334155' : '#e2e8f0';
   const textColor = isDark ? '#cbd5e1' : '#475569';
 
-  // Forecast
   const f = d.forecast;
   const labels = f.projection.map(p => p.date.slice(5));
   const balances = f.projection.map(p => p.balance);
-  $('projection-meta').textContent = `Saldo final: ${fmtBRL(balances[balances.length-1] || 0)}`;
+  $('projection-meta').textContent = balances.length
+    ? `Saldo final: ${fmtBRL(balances[balances.length-1])}` : '';
 
   if (state.charts.forecast) state.charts.forecast.destroy();
   state.charts.forecast = new Chart($('chart-forecast'), {
@@ -368,9 +371,7 @@ function renderCharts(d) {
         data: balances,
         borderColor: '#2563eb',
         backgroundColor: 'rgba(37, 99, 235, 0.1)',
-        fill: true,
-        tension: 0.3,
-        pointRadius: 0
+        fill: true, tension: 0.3, pointRadius: 0
       }]
     },
     options: {
@@ -383,7 +384,6 @@ function renderCharts(d) {
     }
   });
 
-  // Categorias (só gastos)
   const cats = (d.by_category || []).filter(c => c.total < 0)
     .sort((a,b) => a.total - b.total).slice(0, 8);
   if (state.charts.cats) state.charts.cats.destroy();
@@ -398,13 +398,10 @@ function renderCharts(d) {
     },
     options: {
       responsive: true, maintainAspectRatio: false,
-      plugins: {
-        legend: { position: 'bottom', labels:{color:textColor, font:{size:11}}}
-      }
+      plugins: { legend: { position: 'bottom', labels:{color:textColor, font:{size:11}}}}
     }
   });
 
-  // Fluxo mensal
   const mf = d.monthly_flow || [];
   if (state.charts.monthly) state.charts.monthly.destroy();
   state.charts.monthly = new Chart($('chart-monthly'), {
@@ -440,7 +437,7 @@ function renderInsights(insights) {
         <p class="font-semibold text-sm">${i.title}</p>
         <p class="text-xs mt-0.5 opacity-90">${i.message}</p>
       </div>`).join('')
-    : '<p class="text-sm text-slate-500">Nenhum insight ainda. Adicione transações.</p>';
+    : '<p class="text-sm text-slate-500">Nenhum insight ainda. Adicione transações ou clique em "Carregar demo".</p>';
 }
 
 function renderTransactions(txs) {
@@ -461,12 +458,12 @@ function renderTransactions(txs) {
           <button onclick="delTx('${t.id}')" class="text-xs text-slate-400 hover:text-red-600">✕</button>
         </div>
       </div>`).join('')
-    : '<p class="text-sm text-slate-500 text-center py-8">Sem transações. Adicione uma ou carregue a demo.</p>';
+    : '<p class="text-sm text-slate-500 text-center py-8">Sem transações. Adicione uma ou clique em "Carregar demo".</p>';
 }
 
 window.delTx = async (id) => {
   if (!confirm('Excluir transação?')) return;
-  await api('/transactions/' + id, { method: 'DELETE' });
+  await state.store.deleteTransaction(id);
   await loadDashboard();
 };
 
@@ -479,15 +476,15 @@ function renderGoals(goals) {
           <button onclick="delGoal('${g.id}')" class="text-xs text-slate-400 hover:text-red-600">✕</button>
         </div>
         <div class="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
-          <div class="h-full bg-emerald-500" style="width:${Math.min(g.progress, 100)}%"></div>
+          <div class="h-full bg-emerald-500" style="width:${Math.min(g.progress || 0, 100)}%"></div>
         </div>
-        <p class="text-xs text-slate-500 mt-1">${fmtBRL(g.current)} / ${fmtBRL(g.target)} (${g.progress}%)</p>
+        <p class="text-xs text-slate-500 mt-1">${fmtBRL(g.current || 0)} / ${fmtBRL(g.target)} (${g.progress || 0}%)</p>
       </div>`).join('')
     : '<p class="text-xs text-slate-500">Nenhuma meta.</p>';
 }
 
 window.delGoal = async (id) => {
-  await api('/goals/' + id, { method: 'DELETE' });
+  await state.store.deleteGoal(id);
   await loadDashboard();
 };
 
@@ -502,20 +499,16 @@ function renderRules(rules) {
 }
 
 window.delRule = async (id) => {
-  await api('/rules/' + id, { method: 'DELETE' });
+  await state.store.deleteRule(id);
   await loadDashboard();
 };
 
-/* ============ forms ============ */
 $('tx-form').onsubmit = async (e) => {
   e.preventDefault();
-  await api('/transactions', {
-    method: 'POST',
-    body: JSON.stringify({
-      description: $('tx-desc').value,
-      amount: parseFloat($('tx-amount').value),
-      date: $('tx-date').value || null
-    })
+  await state.store.createTransaction({
+    description: $('tx-desc').value,
+    amount: parseFloat($('tx-amount').value),
+    date: $('tx-date').value || null
   });
   e.target.reset();
   await loadDashboard();
@@ -523,12 +516,9 @@ $('tx-form').onsubmit = async (e) => {
 
 $('goal-form').onsubmit = async (e) => {
   e.preventDefault();
-  await api('/goals', {
-    method: 'POST',
-    body: JSON.stringify({
-      name: $('goal-name').value,
-      target_amount: parseFloat($('goal-target').value)
-    })
+  await state.store.createGoal({
+    name: $('goal-name').value,
+    target_amount: parseFloat($('goal-target').value)
   });
   e.target.reset();
   await loadDashboard();
@@ -536,28 +526,32 @@ $('goal-form').onsubmit = async (e) => {
 
 $('rule-form').onsubmit = async (e) => {
   e.preventDefault();
-  await api('/rules', {
-    method: 'POST',
-    body: JSON.stringify({
-      keyword: $('rule-keyword').value,
-      category: $('rule-category').value
-    })
+  await state.store.createRule({
+    keyword: $('rule-keyword').value,
+    category: $('rule-category').value
   });
   e.target.reset();
   await loadDashboard();
 };
 
-/* ============ init ============ */
+/* init */
 if (localStorage.getItem('fa_theme') === 'dark') {
   document.documentElement.classList.add('dark');
 }
 $('api-base').value = state.api;
-if (state.token) {
-  api('/me').then(u => enterApp(u)).catch(() => {
-    localStorage.removeItem('fa_token');
-    state.token = '';
-  });
-}
+
+(async () => {
+  await initStore();
+  if (state.token) {
+    try {
+      const u = await state.store.me(state.token);
+      await enterApp(u);
+    } catch {
+      localStorage.removeItem('fa_token');
+      state.token = '';
+    }
+  }
+})();
 </script>
 </body>
 </html>

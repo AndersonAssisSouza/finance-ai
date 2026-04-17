@@ -2,7 +2,9 @@
 
 Sistema de gestão financeira pessoal com **inteligência artificial local**, categorização automática, previsões e automação.
 
-> **Nível:** produto MVP pronto para evolução — interface profissional + motor de IA + integração bancária.
+**🌐 App online (GitHub Pages):** https://andersonassissouza.github.io/finance-ai/
+
+> **Dual-mode:** funciona 100% no navegador (localStorage + IA em JS) OU com backend FastAPI completo (SQLite/PostgreSQL + Pluggy). O frontend detecta e escolhe automaticamente.
 
 ---
 
@@ -16,20 +18,16 @@ Sistema de gestão financeira pessoal com **inteligência artificial local**, ca
 - Login/registro integrados
 
 ### Passo 2 — IA e automação
-- **Categorização automática** por dicionário expandido (alimentação, transporte, moradia, saúde, lazer, educação, investimento…)
+- **Categorização automática** por dicionário expandido (11 categorias)
 - **Detecção de recorrência**: identifica assinaturas e pagamentos mensais
 - **Insights da IA**: picos de gasto, outliers estatísticos, tendências
 - **Forecast avançado**: projeção ponderada com média móvel de 90 dias
 - **Score financeiro**: avalia runway, tendência, relação receita/despesa
-- **Regras personalizadas**: usuário cria `palavra → categoria` e o motor aplica em todas as transações
+- **Regras personalizadas**: `palavra → categoria` aplicada a todas as transações
 - **Metas** com acompanhamento de progresso
 
 ### Consolidação contínua
-Toda operação que altera dados (nova transação, exclusão, sync bancário, criação de regra) aciona **re-consolidação completa**:
-- Re-categoriza todas as transações
-- Re-detecta recorrências
-- Recalcula forecast + risco + score
-- Regenera insights
+Toda operação que altera dados aciona **re-consolidação completa**: re-categoriza, re-detecta recorrências, recalcula forecast/risco/score, regenera insights.
 
 ---
 
@@ -37,45 +35,75 @@ Toda operação que altera dados (nova transação, exclusão, sync bancário, c
 
 ```
 finance-ai/
-├── backend/
-│   ├── main.py          # API FastAPI (auth, CRUD, sync, dashboard)
-│   ├── ai_engine.py     # Motor de IA (categorização, insights, forecast)
-│   ├── database.py      # SQLAlchemy + SQLite/PostgreSQL
-│   ├── models.py        # User, Transaction, Goal, Rule, Insight
-│   ├── pluggy.py        # Integração Pluggy (Open Finance BR)
+├── backend/                # API FastAPI (opcional)
+│   ├── main.py
+│   ├── ai_engine.py
+│   ├── database.py
+│   ├── models.py
+│   ├── pluggy.py
 │   ├── requirements.txt
 │   └── .env.example
-└── frontend/
-    └── index.html       # Dashboard único (SPA)
+├── frontend/
+│   ├── index.html          # SPA principal
+│   ├── ai_engine.js        # Motor de IA em JS (modo offline)
+│   └── storage.js          # Camada dual (API ↔ localStorage)
+├── start.bat               # Setup e execução local (Windows)
+├── start.sh                # Setup e execução local (Linux/Mac)
+└── index.html              # Redirect raiz para GitHub Pages
 ```
 
 ---
 
 ## 🚀 Como executar
 
-### Backend
+### Modo 1 — 100% no navegador (sem instalação)
+Abra https://andersonassissouza.github.io/finance-ai/ e use. Dados ficam no seu `localStorage` e o motor de IA roda em JavaScript no browser.
+
+### Modo 2 — Local completo (com backend FastAPI)
+
+**Windows:**
+```cmd
+start.bat
+```
+
+**Linux/Mac:**
+```bash
+chmod +x start.sh
+./start.sh
+```
+
+O script cria venv, instala dependências, copia `.env.example` e inicia:
+- Backend em http://localhost:8000 (docs: `/docs`)
+- Frontend abre automaticamente no navegador
+
+Se preferir manual:
 ```bash
 cd backend
+python -m venv .venv
+# Windows: .venv\Scripts\activate  |  Linux/Mac: source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env          # edite conforme necessário
+cp .env.example .env
 uvicorn main:app --reload
 ```
-- API: http://localhost:8000
-- Docs: http://localhost:8000/docs
 
-### Frontend
-Abra `frontend/index.html` no navegador. No campo "API do backend", deixe `http://localhost:8000`.
+### Como o frontend escolhe o modo
+1. Tenta `GET {API}/` (default: `http://localhost:8000`) em até 1,5s
+2. Respondeu → **modo API** (backend Python)
+3. Timeout → **modo local** (localStorage)
+
+O badge no topo mostra qual modo está ativo.
 
 ### Testar rapidamente
-1. Crie conta na tela inicial
-2. Clique **"Carregar demo"** no topo — gera 21 transações de exemplo
-3. Navegue pelo dashboard: KPIs, gráficos, insights, metas e regras
+1. Abrir o app (online ou local)
+2. Criar conta
+3. Clicar **"Carregar demo"** — 21 transações de exemplo
+4. Explorar KPIs, gráficos, insights, metas e regras
 
 ---
 
 ## 🔌 Integração bancária (Pluggy)
 
-Configure `PLUGGY_CLIENT_ID` e `PLUGGY_CLIENT_SECRET` no `.env`, então chame:
+Modo API apenas. Configure `PLUGGY_CLIENT_ID` e `PLUGGY_CLIENT_SECRET` em `backend/.env`:
 ```bash
 POST /sync  { "item_id": "<item_id_do_pluggy>" }
 ```
@@ -94,24 +122,22 @@ POST /sync  { "item_id": "<item_id_do_pluggy>" }
 | Outliers | Detecção por desvio-padrão (> μ + 2σ) |
 | Spike | Comparação últimos 30d vs 30-60d anteriores |
 
-**Sem APIs externas** — todo processamento roda localmente em Python puro.
+**Sem APIs externas.** Processamento 100% local — em Python (backend) ou JavaScript (browser). Mesmo algoritmo nos dois lados.
 
 ---
 
-## 🔐 Endpoints principais
+## 🔐 Endpoints principais (modo API)
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
 | POST | `/auth/register` | Cria conta |
 | POST | `/auth/login` | Retorna JWT |
-| GET | `/dashboard` | **Consolidação completa** (KPIs + gráficos + insights) |
-| GET | `/transactions` | Lista transações |
-| POST | `/transactions` | Cria transação (aciona consolidação) |
-| DELETE | `/transactions/{id}` | Remove (aciona consolidação) |
+| GET | `/dashboard` | **Consolidação completa** |
+| GET/POST/DELETE | `/transactions` | CRUD transações (aciona consolidação) |
 | POST | `/sync` | Importa do Pluggy |
 | GET/POST/DELETE | `/goals` | CRUD metas |
 | GET/POST/DELETE | `/rules` | CRUD regras de automação |
-| POST | `/reconsolidate` | Força re-consolidação manual |
+| POST | `/reconsolidate` | Força re-consolidação |
 | POST | `/demo` | Popula transações de exemplo |
 
 Autenticação: header `Authorization: Bearer <token>`.
@@ -122,7 +148,7 @@ Autenticação: header `Authorization: Bearer <token>`.
 
 - [ ] Mobile (PWA)
 - [ ] Importação OFX/CSV manual
-- [ ] Categorias customizadas via UI
+- [ ] Sincronização cloud dos dados do modo local
 - [ ] Exportação relatório PDF
 - [ ] Integração com IA externa (LLM) para insights em linguagem natural
 - [ ] Alertas proativos via push/email
