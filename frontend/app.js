@@ -26,14 +26,10 @@ const h = (tag, attrs = {}, ...children) => {
   }
   return el;
 };
-const monthKey = d => (d || new Date().toISOString()).slice(0,7);
+/* monthKey e addMonths já definidos em storage.js/ai_engine.js (scope global) */
 function monthLabel(ym) {
   const [y,m] = ym.split("-");
   return new Date(+y, +m - 1, 1).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
-}
-function addMonths(ym, n) {
-  const [y,m] = ym.split("-").map(Number);
-  return new Date(y, m - 1 + n, 1).toISOString().slice(0,7);
 }
 
 const App = { charts: {}, currentMonth: monthKey() };
@@ -54,6 +50,7 @@ const routes = {
   "fire":        { title: "Investir & FIRE", render: renderFire,    icon: "🔥" },
   "reports":     { title: "Relatórios",   render: renderReports,    icon: "📑" },
   "reconcile":   { title: "Conciliar",    render: renderReconcile,  icon: "🔄" },
+  "family":      { title: "Família",      render: renderFamily,     icon: "👨‍👩‍👧" },
   "chat":        { title: "Chat IA",      render: renderChat,       icon: "🤖" },
   "settings":    { title: "Configurações",render: renderSettings,   icon: "⚙️" },
 };
@@ -2139,6 +2136,134 @@ function showOnboard(steps, idx) {
     )
   );
   document.body.appendChild(bd);
+}
+
+/* ============ FAMILY ============ */
+function renderFamily() {
+  const wrap = h("div", {});
+  wrap.append(pageHead("Família & Compartilhamento", "Um orçamento compartilhado com outros dispositivos e membros"));
+
+  const ws = window.Cloud ? Cloud.info() : null;
+  if (!ws) {
+    wrap.append(h("div", { class: "card" },
+      h("h3", {}, "🏠 Comece configurando o workspace compartilhado"),
+      h("p", { class: "text-sm text-muted mb-3" },
+        "Um workspace sincroniza os mesmos dados em todos os dispositivos (celular, desktop, tablet) e permite que outras pessoas entrem com o link compartilhado."),
+      h("div", { class: "grid grid-2 gap-3" },
+        h("div", { class: "card", style: "background:var(--bg-subtle)" },
+          h("div", { class: "font-semi mb-2" }, "☁️ JSONBin (recomendado — sem cadastro)"),
+          h("div", { class: "text-xs text-muted mb-3" },
+            "Criação instantânea. Privado por default. Aguenta famílias pequenas."),
+          h("button", { class: "btn btn-gradient w-full", onClick: async () => {
+            try {
+              await Cloud.initJsonbin({ key: null });
+              Cloud.enableAutoSync();
+              alert("✅ Workspace criado! Copie o link em Configurações e compartilhe.");
+              navigate();
+            } catch (e) { alert("Erro: " + e.message); }
+          }}, "Criar workspace agora")
+        ),
+        h("div", { class: "card", style: "background:var(--bg-subtle)" },
+          h("div", { class: "font-semi mb-2" }, "🐙 GitHub Gist (mais privacidade)"),
+          h("div", { class: "text-xs text-muted mb-3" },
+            "Dados em gist privado na sua conta GitHub. Requer Personal Access Token."),
+          h("button", { class: "btn btn-outline w-full", onClick: async () => {
+            const token = prompt("Personal Access Token (scope 'gist')\n\nGere em: https://github.com/settings/tokens");
+            if (!token) return;
+            try {
+              await Cloud.initGist({ token });
+              Cloud.enableAutoSync();
+              alert("✅ Gist criado!");
+              navigate();
+            } catch (e) { alert("Erro: " + e.message); }
+          }}, "Conectar GitHub")
+        )
+      ),
+      h("div", { class: "card mt-3", style: "background:var(--bg-subtle)" },
+        h("div", { class: "font-semi mb-2" }, "🔗 Já tem um workspace? Entre com o link"),
+        h("div", { class: "text-xs text-muted mb-3" },
+          "Cole o link fa://ws/... que outro membro da família enviou"),
+        h("button", { class: "btn btn-primary", onClick: async () => {
+          const link = prompt("Cole o link:");
+          if (!link) return;
+          try {
+            await Cloud.joinWorkspace(link);
+            Cloud.enableAutoSync();
+            alert("✅ Conectado ao workspace!");
+            location.reload();
+          } catch (e) { alert("Erro: " + e.message); }
+        }}, "Entrar com link"))
+    ));
+    return wrap;
+  }
+
+  // Workspace ativo
+  const link = Cloud.shareLink();
+  wrap.append(h("div", { class: "grid grid-3 mb-3" },
+    kpiCard("Status", "Conectado",
+      h("div", { class: "delta pos" }, `via ${ws.provider === "jsonbin" ? "JSONBin" : "GitHub Gist"}`), true),
+    kpiCard("Última sincronização",
+      ws.last_sync_at ? new Date(ws.last_sync_at).toLocaleString("pt-BR").slice(0, 17) : "—"),
+    kpiCard("Sync automático", "5 min",
+      h("div", { class: "delta" }, "Mudanças enviadas em background"))
+  ));
+
+  wrap.append(h("div", { class: "card mb-3" },
+    h("h3", {}, "🔗 Link para convidar família"),
+    h("p", { class: "text-xs text-muted mb-2" },
+      "Qualquer pessoa com este link verá os mesmos dados. Envie apenas para quem confia."),
+    h("div", { class: "flex gap-2" },
+      h("input", { class: "input", value: link, readOnly: true, onClick: e => e.target.select() }),
+      h("button", { class: "btn btn-primary", onClick: () => {
+        navigator.clipboard?.writeText(link);
+        alert("Link copiado para a área de transferência!");
+      }}, "📋 Copiar"),
+      h("button", { class: "btn btn-outline", onClick: () => {
+        if (navigator.share) navigator.share({ title: "Finance AI — Workspace", text: "Entre no meu workspace de finanças:", url: link });
+        else alert("Compartilhamento nativo não disponível. Copie o link.");
+      }}, "📤 Compartilhar")
+    )
+  ));
+
+  wrap.append(h("div", { class: "card mb-3" },
+    h("h3", {}, "⚡ Ações manuais"),
+    h("div", { class: "flex gap-2" },
+      h("button", { class: "btn btn-primary", onClick: async () => {
+        try { const r = await Cloud.push(); alert(r.skipped ? "Nada para enviar — já sincronizado" : "✅ Enviado!"); navigate(); }
+        catch (e) { alert("Erro: " + e.message); }
+      }}, "⬆ Enviar agora"),
+      h("button", { class: "btn btn-outline", onClick: async () => {
+        if (!confirm("Isso substituirá seus dados locais pela versão da nuvem. Continuar?")) return;
+        try { await Cloud.pull(); alert("✅ Baixado da nuvem!"); location.reload(); }
+        catch (e) { alert("Erro: " + e.message); }
+      }}, "⬇ Baixar agora"),
+      h("button", { class: "btn btn-ghost", style: "color:var(--danger)", onClick: () => {
+        if (confirm("Desconectar da nuvem? Dados locais permanecem.")) { Cloud.disconnect(); navigate(); }
+      }}, "❌ Desconectar")
+    )
+  ));
+
+  wrap.append(h("div", { class: "card" },
+    h("h3", {}, "👥 Perfis neste dispositivo"),
+    h("p", { class: "text-xs text-muted mb-3" },
+      "Cada perfil tem dados próprios. Pai, mãe e filhos podem compartilhar o mesmo dispositivo com perfis separados."),
+    h("div", { class: "list" }, ...Object.values(Store.db.users).map(u =>
+      h("div", { class: "list-item" },
+        h("div", { class: "avatar" }, "👤"),
+        h("div", { class: "grow" },
+          h("div", { class: "title" }, u.name, u.id === Store.currentUserId ? h("span", { class: "badge brand", style: "margin-left:8px" }, "atual") : null),
+          h("div", { class: "sub" }, u.email)
+        ),
+        u.id !== Store.currentUserId && h("button", { class: "btn btn-outline text-xs", onClick: () => {
+          Store._saveSession(u.id); location.reload();
+        }}, "Trocar")
+      )
+    )),
+    h("button", { class: "btn btn-gradient mt-3", onClick: () => { location.hash = "#/settings"; } },
+      "+ Gerenciar perfis em Configurações")
+  ));
+
+  return wrap;
 }
 
 /* ============ NOTIF SECTION ============ */

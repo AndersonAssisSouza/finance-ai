@@ -6,13 +6,38 @@
 <meta name="theme-color" content="#6366f1">
 <title>Finance AI — Controle financeiro inteligente</title>
 <meta name="description" content="Sistema completo de gestão financeira pessoal com IA, conciliação bancária Pluggy, orçamentos, metas, investimentos e simulador FIRE.">
-<link rel="manifest" href="./manifest.json">
+<meta name="app-version" content="3.2.1">
+<link rel="manifest" href="./manifest.json?v=321">
 <link rel="icon" type="image/svg+xml" href="./icon.svg">
 <link rel="apple-touch-icon" href="./icon.svg">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Finance AI">
-<link rel="stylesheet" href="./styles.css">
+<script>
+/* === Cache-busting: força limpeza se versão antiga detectada === */
+(async () => {
+  const V = "3.2.1";
+  const prev = localStorage.getItem("fa_app_version");
+  if (prev && prev !== V) {
+    // Versão antiga — limpa tudo e recarrega
+    try {
+      if ("serviceWorker" in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map(r => r.unregister()));
+      }
+      if ("caches" in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map(k => caches.delete(k)));
+      }
+    } catch (e) { console.warn("cleanup:", e); }
+    localStorage.setItem("fa_app_version", V);
+    window.location.reload();
+    return;
+  }
+  localStorage.setItem("fa_app_version", V);
+})();
+</script>
+<link rel="stylesheet" href="./styles.css?v=321">
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
@@ -73,11 +98,11 @@
 <!-- Search modal -->
 <div id="search-modal" class="hidden"></div>
 
-<script src="./storage.js"></script>
-<script src="./ai_engine.js"></script>
-<script src="./notifications.js"></script>
-<script src="./cloud_sync.js"></script>
-<script src="./app.js"></script>
+<script src="./storage.js?v=321"></script>
+<script src="./ai_engine.js?v=321"></script>
+<script src="./notifications.js?v=321"></script>
+<script src="./cloud_sync.js?v=321"></script>
+<script src="./app.js?v=321"></script>
 <script>
 // PWA registration
 if ('serviceWorker' in navigator) {

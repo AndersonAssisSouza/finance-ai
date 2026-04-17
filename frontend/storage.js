@@ -108,7 +108,7 @@ function emptyUserData() {
   };
 }
 
-class Store {
+class FinanceStore {
   constructor() {
     this.db = this._load();
     this.currentUserId = this._loadSession();
@@ -573,4 +573,4 @@ class Store {
   }
 }
 
-window.Store = new Store();
+window.Store = new FinanceStore();

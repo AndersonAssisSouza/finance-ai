@@ -26,7 +26,7 @@ async function requestPermission() {
 }
 
 async function show(id, title, body, tag) {
-  if (Notification.permission !== "granted") return;
+  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
   const sent = loadSent();
   if (sent[id]) return;
   sent[id] = new Date().toISOString();
