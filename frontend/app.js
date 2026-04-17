@@ -3,6 +3,21 @@
  */
 
 const fmt = v => (v ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+/* Parser de valor BR: aceita "65215,79", "65.215,79", "R$ 65.215,79", "65215.79" */
+const num = v => {
+  if (typeof v === "number") return v;
+  if (!v) return 0;
+  let s = String(v).trim().replace(/^R\$\s*/i, "").replace(/\s/g, "");
+  if (s.includes(",") && s.lastIndexOf(",") > s.lastIndexOf(".")) {
+    // Formato BR: 65.215,79 ou 65215,79
+    s = s.replace(/\./g, "").replace(",", ".");
+  } else if (s.match(/,\d{3}/)) {
+    // Formato EN: 65,215.79
+    s = s.replace(/,/g, "");
+  }
+  const n = parseFloat(s);
+  return isNaN(n) ? 0 : n;
+};
 const fmtShort = v => {
   const n = +v || 0;
   if (Math.abs(n) >= 1e6) return (n/1e6).toFixed(1) + "M";
@@ -1511,7 +1526,7 @@ function openNewTx() {
       h("input", { id: "tx-desc", class: "input", placeholder: "Ex: Mercado" })),
     h("div", { class: "field-row" },
       h("label", { class: "field" }, h("span", { class: "lbl" }, "Valor"),
-        h("input", { id: "tx-amt", class: "input", type: "number", step: ".01" })),
+        h("input", { id: "tx-amt", class: "input", type: "text", inputmode: "decimal", step: ".01" })),
       h("label", { class: "field" }, h("span", { class: "lbl" }, "Data"),
         h("input", { id: "tx-date", class: "input", type: "date", value: new Date().toISOString().slice(0,10) }))
     ),
@@ -1529,14 +1544,14 @@ function openNewTx() {
   openModal("+ Nova transação", form, [{
     label: "Salvar", class: "btn-gradient", onClick: () => {
       const t = $("#tx-type-tabs .active").dataset.t;
-      const desc = $("#tx-desc").value, amt = +$("#tx-amt").value, date = $("#tx-date").value;
+      const desc = $("#tx-desc").value, amt = num($("#tx-amt").value), date = $("#tx-date").value;
       if (!desc || !amt) return alert("Preencha descrição e valor");
       const payload = {
         date, description: desc,
         amount: t === "expense" ? -Math.abs(amt) : Math.abs(amt),
         account_id: $("#tx-acc").value,
         type: t,
-        installments: +$("#tx-inst").value || 1,
+        installments: num($("#tx-inst").value) || 1,
         card_id: $("#tx-card").value || null,
         category_id: $("#tx-cat").value || null,
         transfer_to_account: t === "transfer" ? $("#tx-to").value : null
@@ -1573,7 +1588,7 @@ function openAccountModal(existing) {
     ),
     h("div", { class: "field-row" },
       h("label", { class: "field" }, h("span", { class: "lbl" }, "Saldo inicial"),
-        h("input", { id: "ac-bal", class: "input", type: "number", step: ".01", value: s.initial_balance })),
+        h("input", { id: "ac-bal", class: "input", type: "text", inputmode: "decimal", step: ".01", value: s.initial_balance })),
       h("label", { class: "field" }, h("span", { class: "lbl" }, "Ícone"),
         h("input", { id: "ac-icon", class: "input", value: s.icon }))
     ),
@@ -1584,7 +1599,7 @@ function openAccountModal(existing) {
     label: "Salvar", class: "btn-gradient", onClick: () => {
       const data = {
         name: $("#ac-name").value, type: $("#ac-type").value,
-        initial_balance: +$("#ac-bal").value, currency: $("#ac-currency").value,
+        initial_balance: num($("#ac-bal").value), currency: $("#ac-currency").value,
         color: $("#ac-color").value, icon: $("#ac-icon").value, include_in_net_worth: true
       };
       if (existing) Store.updateAccount(existing.id, data);
@@ -1611,8 +1626,8 @@ function openCardModal(existing) {
   openModal((existing ? "Editar" : "+ Novo") + " cartão", body, [{
     label: "Salvar", class: "btn-gradient", onClick: () => {
       const data = {
-        name: $("#ca-name").value, limit: +$("#ca-lim").value,
-        closing_day: +$("#ca-close").value, due_day: +$("#ca-due").value,
+        name: $("#ca-name").value, limit: num($("#ca-lim").value),
+        closing_day: num($("#ca-close").value), due_day: num($("#ca-due").value),
         color_start: $("#ca-c1").value, color_end: $("#ca-c2").value,
         icon: "💳"
       };
@@ -1630,13 +1645,13 @@ function openBudgetModal() {
     h("label", { class: "field" }, h("span", { class: "lbl" }, "Categoria"),
       selectCategory("", null, "bu-cat")),
     h("label", { class: "field" }, h("span", { class: "lbl" }, "Valor planejado"),
-      h("input", { id: "bu-amt", class: "input", type: "number", step: ".01" }))
+      h("input", { id: "bu-amt", class: "input", type: "text", inputmode: "decimal", step: ".01" }))
   );
   openModal("Definir orçamento", body, [{
     label: "Salvar", class: "btn-gradient", onClick: () => {
       Store.setBudget({
         month: $("#bu-month").value, category_id: $("#bu-cat").value,
-        planned: +$("#bu-amt").value
+        planned: num($("#bu-amt").value)
       });
       closeModal(); navigate();
     }
@@ -1659,8 +1674,8 @@ function openGoalModal(existing) {
   openModal((existing ? "Editar" : "+ Nova") + " meta", body, [{
     label: "Salvar", class: "btn-gradient", onClick: () => {
       const data = {
-        name: $("#go-name").value, target_amount: +$("#go-target").value,
-        current_amount: +$("#go-current").value, monthly_contribution: +$("#go-monthly").value,
+        name: $("#go-name").value, target_amount: num($("#go-target").value),
+        current_amount: num($("#go-current").value), monthly_contribution: num($("#go-monthly").value),
         icon: $("#go-icon").value, color: s.color
       };
       if (existing) Store.updateGoal(existing.id, data);
@@ -1678,16 +1693,16 @@ function openDebtModal() {
       h("label", { class: "field" }, h("span", { class: "lbl" }, "Saldo atual"), h("input", { id: "de-bal", class: "input", type: "number" }))
     ),
     h("div", { class: "field-row" },
-      h("label", { class: "field" }, h("span", { class: "lbl" }, "Juros mensal (%)"), h("input", { id: "de-rate", class: "input", type: "number", step: ".01", value: 1 })),
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Juros mensal (%)"), h("input", { id: "de-rate", class: "input", type: "text", inputmode: "decimal", step: ".01", value: 1 })),
       h("label", { class: "field" }, h("span", { class: "lbl" }, "Parcelas total"), h("input", { id: "de-total-inst", class: "input", type: "number" }))
     )
   );
   openModal("+ Nova dívida", body, [{
     label: "Salvar", class: "btn-gradient", onClick: () => {
       Store.addDebt({
-        name: $("#de-name").value, total_amount: +$("#de-total").value,
-        balance: +$("#de-bal").value, interest_rate: +$("#de-rate").value,
-        installments_total: +$("#de-total-inst").value || null
+        name: $("#de-name").value, total_amount: num($("#de-total").value),
+        balance: num($("#de-bal").value), interest_rate: num($("#de-rate").value),
+        installments_total: num($("#de-total-inst").value) || null
       });
       closeModal(); navigate();
     }
@@ -1711,16 +1726,16 @@ function openInvestmentModal() {
     ),
     h("div", { class: "field-row" },
       h("label", { class: "field" }, h("span", { class: "lbl" }, "Quantidade"), h("input", { id: "in-qty", class: "input", type: "number", step: ".0001" })),
-      h("label", { class: "field" }, h("span", { class: "lbl" }, "Preço médio"), h("input", { id: "in-avg", class: "input", type: "number", step: ".01" }))
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Preço médio"), h("input", { id: "in-avg", class: "input", type: "text", inputmode: "decimal", step: ".01" }))
     ),
     h("label", { class: "field" }, h("span", { class: "lbl" }, "Preço atual"),
-      h("input", { id: "in-cur", class: "input", type: "number", step: ".01" }))
+      h("input", { id: "in-cur", class: "input", type: "text", inputmode: "decimal", step: ".01" }))
   );
   openModal("+ Novo investimento", body, [{
     label: "Salvar", class: "btn-gradient", onClick: () => {
       Store.addInvestment({
         name: $("#in-name").value, ticker: $("#in-ticker").value, type: $("#in-type").value,
-        quantity: +$("#in-qty").value, avg_price: +$("#in-avg").value, current_price: +$("#in-cur").value
+        quantity: num($("#in-qty").value), avg_price: num($("#in-avg").value), current_price: num($("#in-cur").value)
       });
       closeModal(); navigate();
     }
@@ -3116,7 +3131,7 @@ function openRecurrenceModal(existing) {
       h("input", { id: "rc-desc", class: "input", value: t.description || "" })),
     h("div", { class: "field-row" },
       h("label", { class: "field" }, h("span", { class: "lbl" }, "Valor (negativo = despesa)"),
-        h("input", { id: "rc-amt", class: "input", type: "number", step: ".01", value: t.amount || "" })),
+        h("input", { id: "rc-amt", class: "input", type: "text", inputmode: "decimal", step: ".01", value: t.amount || "" })),
       h("label", { class: "field" }, h("span", { class: "lbl" }, "Categoria"),
         selectCategory(t.category_id || "", null, "rc-cat"))
     ),
@@ -3145,13 +3160,13 @@ function openRecurrenceModal(existing) {
       const payload = {
         template: {
           description: $("#rc-desc").value,
-          amount: +$("#rc-amt").value,
+          amount: num($("#rc-amt").value),
           category_id: $("#rc-cat").value,
           account_id: $("#rc-acc").value,
-          type: +$("#rc-amt").value >= 0 ? "income" : "expense"
+          type: num($("#rc-amt").value) >= 0 ? "income" : "expense"
         },
         frequency: $("#rc-freq").value,
-        day: +$("#rc-day").value,
+        day: num($("#rc-day").value),
         start_date: $("#rc-start").value,
         end_date: $("#rc-end").value || null,
         active: true
@@ -3592,7 +3607,7 @@ function openAutomationModal() {
       const parsedValue = /^-?\d+(\.\d+)?$/.test(value) ? +value : value;
       const params = {};
       if ($("#au-pkey").value) params[$("#au-pkey").value] = $("#au-pvalue").value;
-      if ($("#au-percent").value) params.percent_of_amount = +$("#au-percent").value;
+      if ($("#au-percent").value) params.percent_of_amount = num($("#au-percent").value);
 
       Automations.add({
         name,
@@ -3744,38 +3759,38 @@ function openIrpfSimulator(year) {
     h("div", { class: "badge info mb-3", style: "display:block; padding:10px" },
       "💡 Valores pré-preenchidos com base nos seus lançamentos. Ajuste conforme necessário."),
     h("label", { class: "field" }, h("span", { class: "lbl" }, "Rendimento tributável anual"),
-      h("input", { id: "ir-rend", class: "input", type: "number", step: ".01", value: rend.toFixed(2) })),
+      h("input", { id: "ir-rend", class: "input", type: "text", inputmode: "decimal", step: ".01", value: rend.toFixed(2) })),
     h("label", { class: "field" }, h("span", { class: "lbl" }, "IR retido na fonte (total do ano)"),
-      h("input", { id: "ir-retido", class: "input", type: "number", step: ".01", value: "0" })),
+      h("input", { id: "ir-retido", class: "input", type: "text", inputmode: "decimal", step: ".01", value: "0" })),
     h("div", { class: "font-semi mt-3 mb-2" }, "Deduções (modalidade completa)"),
     h("div", { class: "field-row" },
       h("label", { class: "field" }, h("span", { class: "lbl" }, "Dependentes (qtde)"),
         h("input", { id: "ir-dep", class: "input", type: "number", min: 0, value: "0" })),
       h("label", { class: "field" }, h("span", { class: "lbl" }, "Previdência Oficial (INSS+PGBL)"),
-        h("input", { id: "ir-prev", class: "input", type: "number", step: ".01", value: "0" }))
+        h("input", { id: "ir-prev", class: "input", type: "text", inputmode: "decimal", step: ".01", value: "0" }))
     ),
     h("div", { class: "field-row" },
       h("label", { class: "field" }, h("span", { class: "lbl" }, "Saúde (sem teto)"),
-        h("input", { id: "ir-saude", class: "input", type: "number", step: ".01", value: saude.toFixed(2) })),
+        h("input", { id: "ir-saude", class: "input", type: "text", inputmode: "decimal", step: ".01", value: saude.toFixed(2) })),
       h("label", { class: "field" }, h("span", { class: "lbl" }, "Educação (teto R$ 3.561 por pessoa)"),
-        h("input", { id: "ir-edu", class: "input", type: "number", step: ".01", value: edu.toFixed(2) }))
+        h("input", { id: "ir-edu", class: "input", type: "text", inputmode: "decimal", step: ".01", value: edu.toFixed(2) }))
     ),
     h("label", { class: "field" }, h("span", { class: "lbl" }, "Pensão alimentícia judicial"),
-      h("input", { id: "ir-pensao", class: "input", type: "number", step: ".01", value: "0" })),
+      h("input", { id: "ir-pensao", class: "input", type: "text", inputmode: "decimal", step: ".01", value: "0" })),
     h("div", { id: "ir-result", class: "mt-3" })
   );
 
   openModal("Simulador IR — Ano-base " + year, body, [{
     label: "Calcular", class: "btn-gradient", onClick: () => {
       const input = {
-        rendimentoTributavel: +$("#ir-rend").value || 0,
-        irretido: +$("#ir-retido").value || 0,
+        rendimentoTributavel: num($("#ir-rend").value) || 0,
+        irretido: num($("#ir-retido").value) || 0,
         deducoes: {
-          dependentes: +$("#ir-dep").value || 0,
-          previdencia: +$("#ir-prev").value || 0,
-          saude: +$("#ir-saude").value || 0,
-          educacao: +$("#ir-edu").value || 0,
-          pensao: +$("#ir-pensao").value || 0
+          dependentes: num($("#ir-dep").value) || 0,
+          previdencia: num($("#ir-prev").value) || 0,
+          saude: num($("#ir-saude").value) || 0,
+          educacao: num($("#ir-edu").value) || 0,
+          pensao: num($("#ir-pensao").value) || 0
         }
       };
       const r = IRPFCalc.calcularDeclaracao(input);
