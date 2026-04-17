@@ -50,6 +50,8 @@ const routes = {
   "savings":     { title: "Economizar",   render: renderSavings,    icon: "💰" },
   "fire":        { title: "Investir & FIRE", render: renderFire,    icon: "🔥" },
   "reports":     { title: "Relatórios",   render: renderReports,    icon: "📑" },
+  "statements":  { title: "DRE & Balanço", render: renderStatements, icon: "📚" },
+  "irpf":        { title: "IRPF",          render: renderIRPF,       icon: "📑" },
   "reconcile":   { title: "Conciliar",    render: renderReconcile,  icon: "🔄" },
   "family":      { title: "Família",      render: renderFamily,     icon: "👨‍👩‍👧" },
   "cost-centers":{ title: "Centros de Custo", render: renderCostCenters, icon: "🏢" },
@@ -109,6 +111,9 @@ function boot() {
 
   // Materializa recorrências atrasadas
   try { Store.materializeRecurrences(); } catch (e) { console.warn("recurrences:", e); }
+
+  // Pré-carrega cotações (se multi-moeda)
+  if (window.FX) FX.preloadRates().catch(() => {});
 
   // Esconde tela de login e vai direto ao app
   $("#auth").classList.add("hidden");
@@ -236,6 +241,8 @@ function renderSidebar() {
     h("div", { class: "nav-section" }, "Inteligência"),
     navItem("savings"),
     navItem("reports"),
+    Store.isBusinessMode() && navItem("statements"),
+    navItem("irpf"),
     navItem("reconcile"),
     navItem("family"),
     Store.isBusinessMode() && navItem("cost-centers"),
@@ -526,21 +533,26 @@ function renderAccounts() {
   }
 
   const grid = h("div", { class: "grid grid-3" });
+  const baseCur = FX.userCurrency();
   for (const a of accs) {
     const bal = Store.accountBalance(a.id);
+    const cur = a.currency || baseCur;
+    const converted = cur !== baseCur ? FX.convertSync(bal, cur, baseCur) : null;
     grid.append(h("div", { class: "card" },
       h("div", { class: "flex items-center justify-between mb-2" },
         h("div", { class: "flex items-center gap-3" },
           h("div", { class: "avatar", style: `background:${a.color}20; color:${a.color}` }, a.icon),
           h("div", {},
             h("div", { class: "font-semi" }, a.name),
-            h("div", { class: "text-xs text-muted" }, accountTypeLabel(a.type))
+            h("div", { class: "text-xs text-muted" },
+              accountTypeLabel(a.type), " • ", h("span", { class: "badge", style: "font-size:10px" }, cur))
           )
         ),
         h("button", { class: "btn btn-ghost btn-icon", onClick: () => openAccountModal(a) }, "⚙️")
       ),
-      h("div", { class: "text-2xl font-bold mt-2" }, fmt(bal)),
-      h("div", { class: "text-xs text-muted" }, `Saldo inicial: ${fmt(a.initial_balance)}`),
+      h("div", { class: "text-2xl font-bold mt-2" }, FX.format(bal, cur)),
+      converted !== null && h("div", { class: "text-xs text-muted" }, "≈ ", FX.format(converted, baseCur)),
+      h("div", { class: "text-xs text-muted" }, `Saldo inicial: ${FX.format(a.initial_balance, cur)}`),
       h("div", { class: "flex gap-2 mt-3" },
         h("button", { class: "btn btn-outline text-xs", onClick: () => { location.hash = `#/transactions?account=${a.id}`; } }, "Ver transações"),
         h("button", { class: "btn btn-ghost text-xs", style: "color:var(--danger)", onClick: () => {
@@ -1278,7 +1290,11 @@ function renderChat() {
   );
   wrap.append(card);
 
-  addMsg("bot", "Olá! Sou sua IA financeira. Posso responder sobre saldos, gastos, economia, investimentos, metas, assinaturas, dívidas e mais.\n\nTente: *\"Onde posso economizar?\"*");
+  const llmOn = window.LLM?.isConfigured();
+  const greet = llmOn
+    ? `Olá! Estou conectada ao ${window.LLM.PROVIDERS[window.LLM.loadConfig().provider]?.name || "LLM externo"} e tenho acesso ao seu contexto financeiro completo. Pergunte qualquer coisa!`
+    : "Olá! Sou sua IA financeira. Posso responder sobre saldos, gastos, economia, investimentos, metas, assinaturas, dívidas e mais.\n\nTente: *\"Onde posso economizar?\"*\n\n💡 Ative um LLM externo em Configurações para respostas mais inteligentes.";
+  addMsg("bot", greet);
 
   // suggestions
   const suggestions = h("div", { class: "flex gap-2 mt-3", style: "flex-wrap:wrap" },
@@ -1294,11 +1310,22 @@ function renderChat() {
     msgsEl.appendChild(msg);
     msgsEl.scrollTop = msgsEl.scrollHeight;
   }
-  function send() {
+  async function send() {
     const q = inputEl.value.trim(); if (!q) return;
     addMsg("user", q);
     inputEl.value = "";
-    setTimeout(() => { addMsg("bot", AI.chat(Store, q)); }, 200);
+    const thinking = h("div", { class: "chat-msg bot" }, "⏳ pensando...");
+    msgsEl.appendChild(thinking); msgsEl.scrollTop = msgsEl.scrollHeight;
+    try {
+      const answer = window.LLM?.isConfigured()
+        ? await window.LLM.ask(Store, q)
+        : AI.chat(Store, q);
+      thinking.remove();
+      addMsg("bot", answer);
+    } catch (err) {
+      thinking.remove();
+      addMsg("bot", `Erro: ${err.message}`);
+    }
   }
   inputEl.addEventListener("keydown", e => { if (e.key === "Enter") send(); });
   return wrap;
@@ -1376,6 +1403,12 @@ function renderSettings() {
       }, "🏢 Empresarial")
     )
   ));
+
+  // === MOEDA BASE ===
+  wrap.append(renderCurrencySection());
+
+  // === LLM EXTERNO ===
+  wrap.append(renderLlmSection());
 
   // === NOTIFICAÇÕES ===
   wrap.append(renderNotifSection());
@@ -1513,7 +1546,7 @@ function openNewTx() {
 }
 
 function openAccountModal(existing) {
-  const s = existing || { name: "", type: "checking", initial_balance: 0, color: "#6366f1", icon: "🏦", include_in_net_worth: true };
+  const s = existing || { name: "", type: "checking", initial_balance: 0, currency: FX.userCurrency(), color: "#6366f1", icon: "🏦", include_in_net_worth: true };
   const body = h("div", {},
     h("label", { class: "field" }, h("span", { class: "lbl" }, "Nome"), h("input", { id: "ac-name", class: "input", value: s.name })),
     h("div", { class: "field-row" },
@@ -1525,21 +1558,25 @@ function openAccountModal(existing) {
           h("option", { value: "investment", selected: s.type === "investment" }, "Investimento"),
         )
       ),
-      h("label", { class: "field" }, h("span", { class: "lbl" }, "Ícone"), h("input", { id: "ac-icon", class: "input", value: s.icon }))
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Moeda"),
+        h("select", { id: "ac-currency", class: "select" },
+          ...FX.SUPPORTED.map(c => h("option", { value: c.code, selected: c.code === (s.currency || FX.userCurrency()) }, `${c.symbol}  ${c.code}`))))
     ),
     h("div", { class: "field-row" },
       h("label", { class: "field" }, h("span", { class: "lbl" }, "Saldo inicial"),
         h("input", { id: "ac-bal", class: "input", type: "number", step: ".01", value: s.initial_balance })),
-      h("label", { class: "field" }, h("span", { class: "lbl" }, "Cor"),
-        h("input", { id: "ac-color", class: "input", type: "color", value: s.color }))
-    )
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Ícone"),
+        h("input", { id: "ac-icon", class: "input", value: s.icon }))
+    ),
+    h("label", { class: "field" }, h("span", { class: "lbl" }, "Cor"),
+      h("input", { id: "ac-color", class: "input", type: "color", value: s.color }))
   );
   openModal((existing ? "Editar" : "+ Nova") + " conta", body, [{
     label: "Salvar", class: "btn-gradient", onClick: () => {
       const data = {
         name: $("#ac-name").value, type: $("#ac-type").value,
-        initial_balance: +$("#ac-bal").value, color: $("#ac-color").value,
-        icon: $("#ac-icon").value, include_in_net_worth: true
+        initial_balance: +$("#ac-bal").value, currency: $("#ac-currency").value,
+        color: $("#ac-color").value, icon: $("#ac-icon").value, include_in_net_worth: true
       };
       if (existing) Store.updateAccount(existing.id, data);
       else Store.addAccount(data);
@@ -2388,6 +2425,110 @@ function renderFamily() {
   return wrap;
 }
 
+/* ============ CURRENCY SECTION ============ */
+function renderCurrencySection() {
+  const base = FX.userCurrency();
+  return h("div", { class: "card mb-3" },
+    h("h3", {}, "💱 Moeda base e multi-moeda"),
+    h("p", { class: "text-xs text-muted mb-3" },
+      "Contas podem ter moedas diferentes. Os totais (patrimônio, dashboard) são convertidos para a moeda base."),
+    h("div", { class: "flex gap-2 items-end mb-3" },
+      h("label", { class: "field", style: "margin:0; flex:1" },
+        h("span", { class: "lbl" }, "Moeda base"),
+        h("select", { class: "select", onChange: e => {
+          Store.data.settings.currency = e.target.value;
+          Store._save();
+          FX.preloadRates();
+          alert("Moeda base alterada. Recarregue a página para recalcular os totais.");
+        }},
+          ...FX.SUPPORTED.map(c => h("option", { value: c.code, selected: c.code === base }, `${c.symbol}  ${c.name}`)))
+      ),
+      h("button", { class: "btn btn-outline", onClick: async () => {
+        try {
+          const data = await FX.fetchRates(base);
+          alert(`✅ Cotações atualizadas (${data.source}, ${data.date})\n\nExemplos:\nUSD: ${FX.format(1/data.rates.USD, base)}\nEUR: ${FX.format(1/data.rates.EUR, base)}`);
+        } catch (e) { alert("Erro: " + e.message); }
+      }}, "🔄 Atualizar cotações")
+    ),
+    FX.isMultiCurrency() && h("div", { class: "badge info", style: "padding:10px; display:block" },
+      `💡 Você tem contas em ${new Set(Store.accounts().map(a => a.currency || "BRL")).size} moedas diferentes. Patrimônio líquido é convertido automaticamente.`)
+  );
+}
+
+/* ============ LLM SECTION ============ */
+function renderLlmSection() {
+  const cfg = window.LLM?.info();
+  const card = h("div", { class: "card mb-3" },
+    h("h3", {}, "🤖 Assistente IA avançado (LLM externo)"),
+    h("p", { class: "text-xs text-muted mb-3" },
+      "Opcional. Conecta o chat a um modelo externo (OpenAI, Claude, Groq) com contexto dos seus dados. Sua API key fica apenas neste navegador, nunca é enviada a terceiros exceto ao provedor escolhido.")
+  );
+
+  if (cfg) {
+    const prov = window.LLM.PROVIDERS[cfg.provider];
+    card.append(
+      h("div", { class: "badge ok mb-3", style: "display:block; padding:10px" },
+        `✅ Conectado via ${prov?.name || cfg.provider}${cfg.model ? ` • modelo: ${cfg.model}` : ""}`),
+      h("div", { class: "flex gap-2" },
+        h("button", { class: "btn btn-primary", onClick: async () => {
+          try {
+            const r = await window.LLM.ask(Store, "Dê uma análise rápida da minha situação financeira em 2 parágrafos.");
+            alert("✅ Resposta:\n\n" + r.slice(0, 800));
+          } catch (e) { alert("Erro: " + e.message); }
+        }}, "🧪 Testar LLM"),
+        h("button", { class: "btn btn-outline", onClick: () => {
+          if (confirm("Desconectar e apagar API key?")) { window.LLM.disconnect(); navigate(); }
+        }}, "Desconectar")
+      )
+    );
+  } else {
+    const providers = window.LLM?.PROVIDERS || {};
+    const state = { provider: "groq", apiKey: "", model: "" };
+    card.append(
+      h("div", { class: "grid grid-2 gap-2 mb-3" },
+        h("label", { class: "field", style: "margin:0" },
+          h("span", { class: "lbl" }, "Provedor"),
+          h("select", { id: "llm-provider", class: "select", onChange: e => {
+            state.provider = e.target.value;
+            document.getElementById("llm-help").innerHTML = llmHelpFor(state.provider);
+            document.getElementById("llm-model").placeholder = providers[state.provider]?.defaultModel || "";
+          }},
+            ...Object.entries(providers).map(([k,p]) => h("option", { value: k, selected: k === state.provider }, p.name)))
+        ),
+        h("label", { class: "field", style: "margin:0" },
+          h("span", { class: "lbl" }, "Modelo (opcional)"),
+          h("input", { id: "llm-model", class: "input", placeholder: providers[state.provider].defaultModel })
+        )
+      ),
+      h("label", { class: "field" },
+        h("span", { class: "lbl" }, "API Key"),
+        h("input", { id: "llm-apikey", class: "input", type: "password", placeholder: "sk-... ou sk-ant-..." })
+      ),
+      h("div", { id: "llm-help", class: "text-xs text-muted mb-3", html: llmHelpFor(state.provider) }),
+      h("button", { class: "btn btn-gradient", onClick: () => {
+        const apiKey = document.getElementById("llm-apikey").value.trim();
+        if (!apiKey) return alert("Cole a API key");
+        window.LLM.configure({
+          provider: document.getElementById("llm-provider").value,
+          apiKey,
+          model: document.getElementById("llm-model").value.trim() || null
+        });
+        alert("✅ LLM configurado! O chat agora usa o modelo externo.");
+        navigate();
+      }}, "Conectar")
+    );
+  }
+  return card;
+}
+function llmHelpFor(provider) {
+  return {
+    openai: `Crie uma API key em <a href="https://platform.openai.com/api-keys" target="_blank" style="color:var(--brand)">platform.openai.com/api-keys</a>. Custo: centavos por pergunta com GPT-4o-mini.`,
+    anthropic: `Crie em <a href="https://console.anthropic.com/" target="_blank" style="color:var(--brand)">console.anthropic.com</a>. Claude Haiku custa aproximadamente $0.25 por 1M tokens.`,
+    groq: `<b>🆓 100% gratuito.</b> Crie em <a href="https://console.groq.com/keys" target="_blank" style="color:var(--brand)">console.groq.com/keys</a>. Velocidade excelente com Llama 3.3 70B.`,
+    custom: `Cole uma URL compatível OpenAI (Ollama local, LM Studio, LocalAI, vLLM…). Use campo "Endpoint" avançado.`
+  }[provider] || "";
+}
+
 /* ============ NOTIF SECTION ============ */
 function renderNotifSection() {
   const prefs = Store.data.settings.notifications || { bills: true, budgets: true, insights: true, goals: true };
@@ -2579,6 +2720,276 @@ function renderCloudSection() {
     );
   }
   return card;
+}
+
+/* ============ STATEMENTS (DRE + Balanço) ============ */
+function renderStatements() {
+  const wrap = h("div", {});
+  wrap.append(pageHead("DRE & Balanço Patrimonial", "Demonstrativos contábeis simplificados", monthPicker()));
+
+  const month = App.currentMonth;
+  const txs = Store.listTransactions({ month });
+  const base = FX.userCurrency();
+
+  // DRE
+  const revenues = {};
+  const expenses = {};
+  for (const t of txs) {
+    const cat = Store.categoryById(t.category_id);
+    if (!cat) continue;
+    if (t.amount > 0) revenues[cat.group] = (revenues[cat.group] || 0) + t.amount;
+    else if (t.amount < 0) expenses[cat.group] = (expenses[cat.group] || 0) + Math.abs(t.amount);
+  }
+  const totalRev = Object.values(revenues).reduce((s,v) => s+v, 0);
+  const totalExp = Object.values(expenses).reduce((s,v) => s+v, 0);
+  const resultado = totalRev - totalExp;
+  const margem = totalRev > 0 ? (resultado / totalRev * 100) : 0;
+
+  wrap.append(h("div", { class: "card mb-3" },
+    h("h3", {}, "📈 DRE — Demonstração do Resultado"),
+    h("div", { class: "table-wrap" },
+      h("table", { class: "table" },
+        h("thead", {}, h("tr", {}, h("th", {}, "Conta"), h("th", { style: "text-align:right" }, "Valor"))),
+        h("tbody", {},
+          h("tr", { style: "background:rgba(16,185,129,.08)" },
+            h("td", { class: "font-bold" }, "(+) RECEITAS"), h("td", { class: "font-bold", style: "text-align:right" }, fmt(totalRev))),
+          ...Object.entries(revenues).map(([g,v]) => h("tr", {},
+            h("td", { style: "padding-left:30px" }, g),
+            h("td", { style: "text-align:right" }, fmt(v))
+          )),
+          h("tr", { style: "background:rgba(239,68,68,.08)" },
+            h("td", { class: "font-bold" }, "(−) DESPESAS"), h("td", { class: "font-bold", style: "text-align:right" }, fmt(totalExp))),
+          ...Object.entries(expenses).map(([g,v]) => h("tr", {},
+            h("td", { style: "padding-left:30px" }, g),
+            h("td", { style: "text-align:right" }, fmt(v))
+          )),
+          h("tr", { style: "background:var(--brand-grad); color:white" },
+            h("td", { class: "font-bold" }, "(=) RESULTADO LÍQUIDO"),
+            h("td", { class: "font-bold", style: "text-align:right" }, fmt(resultado))),
+          h("tr", {},
+            h("td", { class: "text-muted" }, "Margem líquida"),
+            h("td", { class: "text-muted", style: "text-align:right" }, margem.toFixed(1) + "%"))
+        )
+      )
+    )
+  ));
+
+  // Balanço Patrimonial
+  const nw = Store.netWorth();
+  wrap.append(h("div", { class: "card mb-3" },
+    h("h3", {}, "⚖️ Balanço Patrimonial (posição atual)"),
+    h("div", { class: "grid grid-2" },
+      h("div", {},
+        h("div", { class: "font-semi mb-2", style: "color:var(--success)" }, "ATIVO"),
+        h("table", { class: "table" },
+          h("tbody", {},
+            balanceRow("Caixa e contas correntes", nw.breakdown.cash),
+            balanceRow("Investimentos", nw.breakdown.investments),
+            h("tr", { class: "font-bold" },
+              h("td", {}, "Total do Ativo"),
+              h("td", { style: "text-align:right" }, fmt(nw.assets))
+            )
+          )
+        )
+      ),
+      h("div", {},
+        h("div", { class: "font-semi mb-2", style: "color:var(--danger)" }, "PASSIVO + PATRIMÔNIO LÍQUIDO"),
+        h("table", { class: "table" },
+          h("tbody", {},
+            balanceRow("Dívidas", nw.breakdown.debts),
+            balanceRow("Cartões em aberto", nw.breakdown.cards_open),
+            h("tr", {}, h("td", { class: "text-muted" }, "Passivo total"),
+              h("td", { class: "text-muted", style: "text-align:right" }, fmt(nw.liabilities))),
+            h("tr", { style: "background:var(--brand-grad); color:white" },
+              h("td", { class: "font-bold" }, "Patrimônio Líquido"),
+              h("td", { class: "font-bold", style: "text-align:right" }, fmt(nw.net))
+            ),
+            h("tr", { class: "font-bold" },
+              h("td", {}, "Total Passivo + PL"),
+              h("td", { style: "text-align:right" }, fmt(nw.net + nw.liabilities))
+            )
+          )
+        )
+      )
+    ),
+    h("div", { class: "text-xs text-muted mt-3" },
+      `Expresso em ${base}. Todas as posições em outras moedas foram convertidas pela cotação mais recente.`)
+  ));
+
+  // Por centro de custo (se empresarial)
+  if (Store.isBusinessMode() && Store.costCenters().length) {
+    wrap.append(h("div", { class: "card" },
+      h("h3", {}, "🏢 Resultado por Centro de Custo — " + monthLabel(month)),
+      h("div", { class: "table-wrap" },
+        h("table", { class: "table" },
+          h("thead", {}, h("tr", {}, h("th", {}, "Centro"), h("th", {}, "Receita"), h("th", {}, "Despesa"), h("th", {}, "Resultado"), h("th", {}, "Margem"))),
+          h("tbody", {}, ...Store.costCenters().map(cc => {
+            const ccTxs = txs.filter(t => t.cost_center_id === cc.id);
+            const rev = ccTxs.filter(t => t.amount > 0).reduce((s,t) => s+t.amount, 0);
+            const exp = Math.abs(ccTxs.filter(t => t.amount < 0).reduce((s,t) => s+t.amount, 0));
+            const res = rev - exp;
+            const mar = rev > 0 ? (res/rev*100) : 0;
+            return h("tr", {},
+              h("td", {}, cc.icon, " ", cc.name),
+              h("td", { class: "amt pos" }, fmt(rev)),
+              h("td", { class: "amt neg" }, fmt(exp)),
+              h("td", { class: res >= 0 ? "amt pos font-semi" : "amt neg font-semi" }, fmt(res)),
+              h("td", {}, mar.toFixed(1) + "%")
+            );
+          }))
+        )
+      )
+    ));
+  }
+  return wrap;
+}
+function balanceRow(label, value) {
+  return h("tr", {},
+    h("td", {}, label),
+    h("td", { style: "text-align:right" }, fmt(value))
+  );
+}
+
+/* ============ IRPF ============ */
+function renderIRPF() {
+  const wrap = h("div", {});
+  const currentYear = new Date().getFullYear();
+  const year = App.irpfYear || currentYear - 1;
+  wrap.append(pageHead("Relatório IRPF", `Ano-base ${year} — para Declaração ${year + 1}`,
+    h("select", { class: "select", onChange: e => { App.irpfYear = +e.target.value; navigate(); }},
+      ...[0,1,2,3].map(n => h("option", { value: currentYear - n, selected: (currentYear - n) === year }, currentYear - n))),
+    h("button", { class: "btn btn-outline", onClick: () => exportIrpfCsv(year) }, "⬇ Exportar CSV")
+  ));
+
+  wrap.append(h("div", { class: "badge warn mb-3", style: "display:block; padding:10px" },
+    "⚠️ Este relatório é uma referência. Confirme valores no informe de rendimentos oficial de cada fonte pagadora."));
+
+  // Bens e direitos (contas + investimentos em 31/12)
+  const base = FX.userCurrency();
+  const accounts = Store.accounts();
+  const investments = Store.investments();
+  const debts = Store.debts();
+  const nw = Store.netWorth();
+
+  wrap.append(h("div", { class: "card mb-3" },
+    h("h3", {}, "📦 Bens e Direitos (posição em 31/12)"),
+    h("div", { class: "table-wrap" },
+      h("table", { class: "table" },
+        h("thead", {}, h("tr", {},
+          h("th", {}, "Código"), h("th", {}, "Descrição"), h("th", {}, "Tipo"), h("th", { style: "text-align:right" }, "Valor"))),
+        h("tbody", {},
+          ...accounts.map(a => h("tr", {},
+            h("td", {}, a.type === "savings" ? "02" : "01"),
+            h("td", {}, a.icon, " ", a.name, h("span", { class: "text-xs text-muted" }, " (CPF/CNPJ do banco)")),
+            h("td", {}, a.type === "savings" ? "Poupança" : "Conta corrente"),
+            h("td", { style: "text-align:right" }, fmt(Store.accountBalance(a.id)))
+          )),
+          ...investments.map(i => h("tr", {},
+            h("td", {}, invCode(i.type)),
+            h("td", {}, "📈 ", i.name, " (", i.ticker, ")"),
+            h("td", {}, invTypeLabel(i.type)),
+            h("td", { style: "text-align:right" }, fmt(i.quantity * i.current_price))
+          )),
+          h("tr", { class: "font-bold" },
+            h("td", { colspan: 3 }, "TOTAL"),
+            h("td", { style: "text-align:right" }, fmt(nw.assets))
+          )
+        )
+      )
+    )
+  ));
+
+  // Dívidas e Ônus
+  if (debts.length) {
+    wrap.append(h("div", { class: "card mb-3" },
+      h("h3", {}, "📉 Dívidas e Ônus Reais"),
+      h("div", { class: "table-wrap" },
+        h("table", { class: "table" },
+          h("thead", {}, h("tr", {},
+            h("th", {}, "Código"), h("th", {}, "Descrição"), h("th", { style: "text-align:right" }, "Valor"))),
+          h("tbody", {},
+            ...debts.map(d => h("tr", {},
+              h("td", {}, "11"),
+              h("td", {}, d.name),
+              h("td", { style: "text-align:right" }, fmt(d.balance))
+            ))
+          )
+        )
+      )
+    ));
+  }
+
+  // Rendimentos tributáveis e isentos
+  const yearTxs = Store.data.transactions.filter(t =>
+    t.date && t.date.slice(0,4) === String(year) && t.amount > 0);
+
+  const salarios = yearTxs.filter(t => t.category_id === "cat_salary").reduce((s,t) => s+t.amount, 0);
+  const freelance = yearTxs.filter(t => t.category_id === "cat_freelance").reduce((s,t) => s+t.amount, 0);
+  const rendimentos = yearTxs.filter(t => t.category_id === "cat_dividend").reduce((s,t) => s+t.amount, 0);
+  const outros = yearTxs.filter(t => !["cat_salary","cat_freelance","cat_dividend","cat_transfer"].includes(t.category_id))
+    .reduce((s,t) => s+t.amount, 0);
+
+  wrap.append(h("div", { class: "grid grid-2 mb-3" },
+    h("div", { class: "card" },
+      h("h3", {}, "💰 Rendimentos Tributáveis"),
+      h("table", { class: "table" },
+        h("tbody", {},
+          h("tr", {}, h("td", {}, "Salários (CLT)"), h("td", { style: "text-align:right" }, fmt(salarios))),
+          h("tr", {}, h("td", {}, "Freelance / PJ"), h("td", { style: "text-align:right" }, fmt(freelance))),
+          h("tr", {}, h("td", {}, "Aluguéis recebidos"), h("td", { style: "text-align:right" }, fmt(0))),
+          h("tr", { class: "font-bold" },
+            h("td", {}, "TOTAL"),
+            h("td", { style: "text-align:right" }, fmt(salarios + freelance)))
+        )
+      )
+    ),
+    h("div", { class: "card" },
+      h("h3", {}, "🟢 Rendimentos Isentos ou Tributados Exclusivamente na Fonte"),
+      h("table", { class: "table" },
+        h("tbody", {},
+          h("tr", {}, h("td", {}, "Rendimentos poupança"), h("td", { style: "text-align:right" }, fmt(0))),
+          h("tr", {}, h("td", {}, "Dividendos / JCP"), h("td", { style: "text-align:right" }, fmt(rendimentos))),
+          h("tr", {}, h("td", {}, "FGTS / PIS / indenizações"), h("td", { style: "text-align:right" }, fmt(0))),
+          h("tr", { class: "font-bold" },
+            h("td", {}, "TOTAL"),
+            h("td", { style: "text-align:right" }, fmt(rendimentos)))
+        )
+      )
+    )
+  ));
+
+  // Quadro resumo
+  wrap.append(h("div", { class: "card" },
+    h("h3", {}, "📋 Resumo da Declaração"),
+    h("div", { class: "grid grid-4" },
+      kpiCard("Patrimônio em 31/12", fmt(nw.assets)),
+      kpiCard("Passivos declaráveis", fmt(debts.reduce((s,d) => s+d.balance, 0))),
+      kpiCard("Rendimentos tributáveis", fmt(salarios + freelance)),
+      kpiCard("Rendimentos isentos", fmt(rendimentos))
+    ),
+    h("div", { class: "text-xs text-muted mt-3" },
+      "Os códigos (01/02/...) referem-se à tabela oficial de Bens e Direitos da Receita Federal. Consulte informes das instituições para os valores exatos.")
+  ));
+
+  return wrap;
+}
+function invCode(type) {
+  return { acoes: "31", fii: "73", etf: "74", renda_fixa: "04", cripto: "81" }[type] || "99";
+}
+function invTypeLabel(type) {
+  return { acoes: "Ações", fii: "Fundo imobiliário", etf: "ETF", renda_fixa: "Renda fixa", cripto: "Criptoativo" }[type] || type;
+}
+function exportIrpfCsv(year) {
+  const rows = [["Tipo","Descrição","Valor"]];
+  Store.accounts().forEach(a => rows.push(["Conta", a.name, Store.accountBalance(a.id).toFixed(2)]));
+  Store.investments().forEach(i => rows.push(["Investimento", `${i.name} (${i.ticker})`, (i.quantity * i.current_price).toFixed(2)]));
+  Store.debts().forEach(d => rows.push(["Dívida", d.name, d.balance.toFixed(2)]));
+  const csv = rows.map(r => r.map(x => `"${String(x).replace(/"/g, '""')}"`).join(",")).join("\n");
+  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `finance-ai-irpf-${year}.csv`; a.click();
+  URL.revokeObjectURL(url);
 }
 
 /* ============ RECURRENCES VIEW ============ */

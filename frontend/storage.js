@@ -166,8 +166,13 @@ class FinanceStore {
   /* === ACCOUNTS === */
   accounts() { return (this.data?.accounts || []).filter(a => !a.archived); }
   accountById(id) { return this.data?.accounts.find(a => a.id === id); }
-  addAccount({ name, type = "checking", initial_balance = 0, color = "#6366f1", icon = "🏦", include_in_net_worth = true }) {
-    const a = { id: uid("acc_"), name, type, initial_balance: +initial_balance, color, icon, include_in_net_worth, created_at: now() };
+  addAccount({ name, type = "checking", initial_balance = 0, currency = null, color = "#6366f1", icon = "🏦", include_in_net_worth = true }) {
+    const a = {
+      id: uid("acc_"), name, type,
+      initial_balance: +initial_balance,
+      currency: currency || this.data?.settings?.currency || "BRL",
+      color, icon, include_in_net_worth, created_at: now()
+    };
     this.data.accounts.push(a);
     this._save();
     return a;
@@ -437,18 +442,22 @@ class FinanceStore {
 
   /* === COMPUTED === */
   netWorth() {
+    const base = this.data?.settings?.currency || "BRL";
+    const conv = window.FX ? (v, from) => FX.convertSync(v, from || base, base) : (v) => v;
+
     const accAssets = this.accounts()
       .filter(a => a.include_in_net_worth)
-      .reduce((s,a) => s + this.accountBalance(a.id), 0);
+      .reduce((s,a) => s + conv(this.accountBalance(a.id), a.currency || base), 0);
     const investAssets = this.investments()
-      .reduce((s,i) => s + i.quantity * i.current_price, 0);
-    const liabilities = this.debts().reduce((s,d) => s + d.balance, 0);
-    const cardsDue = this.cards().reduce((s,c) => s + this.cardCurrentUsage(c.id), 0);
+      .reduce((s,i) => s + conv(i.quantity * i.current_price, i.currency || base), 0);
+    const liabilities = this.debts().reduce((s,d) => s + conv(d.balance, d.currency || base), 0);
+    const cardsDue = this.cards().reduce((s,c) => s + conv(this.cardCurrentUsage(c.id), c.currency || base), 0);
     const assets = +(accAssets + investAssets).toFixed(2);
     const totalLiabilities = +(liabilities + cardsDue).toFixed(2);
     return {
       assets, liabilities: totalLiabilities,
       net: +(assets - totalLiabilities).toFixed(2),
+      base_currency: base,
       breakdown: {
         cash: +accAssets.toFixed(2),
         investments: +investAssets.toFixed(2),
