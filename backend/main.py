@@ -207,6 +207,37 @@ def delete_transaction(
 
 
 # ---------------- Pluggy sync ----------------
+@app.post("/pluggy/fetch")
+def pluggy_fetch(data: SyncIn):
+    """Busca transações do Pluggy e retorna (sem persistir).
+    Usado pelo frontend local para reconciliação no storage do browser."""
+    api_key = get_api_key()
+    if not api_key:
+        raise HTTPException(400, "Pluggy não configurado. Defina PLUGGY_CLIENT_ID / PLUGGY_CLIENT_SECRET")
+    out_accounts = []
+    out_txs = []
+    try:
+        accounts = get_accounts(api_key, data.item_id)
+        for acc in accounts.get("results", []):
+            out_accounts.append({
+                "id": acc["id"], "name": acc.get("name"),
+                "type": acc.get("type"), "balance": acc.get("balance")
+            })
+            txs = get_transactions(api_key, acc["id"])
+            for t in txs.get("results", []):
+                out_txs.append({
+                    "id": t["id"], "account_id": acc["id"],
+                    "date": t["date"][:10],
+                    "description": t.get("description") or t.get("descriptionRaw", ""),
+                    "amount": t.get("amount", 0),
+                    "currency": t.get("currencyCode", "BRL"),
+                    "type": "income" if t.get("amount", 0) > 0 else "expense"
+                })
+    except Exception as e:
+        raise HTTPException(502, f"Falha ao buscar no Pluggy: {e}")
+    return {"accounts": out_accounts, "transactions": out_txs}
+
+
 @app.post("/sync")
 def sync(
     data: SyncIn,
