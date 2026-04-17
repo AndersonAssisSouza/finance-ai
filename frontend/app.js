@@ -3157,43 +3157,69 @@ function openRecurrenceModal(existing) {
         h("input", { id: "rc-end", class: "input", type: "date", value: existing?.end_date || "" }))
     )
   );
-  openModal((existing ? "Editar" : "+ Nova") + " recorrência", body, [{
-    label: "Salvar", class: "btn-gradient", onClick: () => {
-      const desc = $("#rc-desc").value.trim();
-      const amt = num($("#rc-amt").value);
-      const cat = $("#rc-cat").value;
-      const acc = $("#rc-acc").value;
+  const saveRecurrence = () => {
+    console.log("[REC] Click Salvar disparou");
+    try {
+      const descEl = document.getElementById("rc-desc");
+      const amtEl = document.getElementById("rc-amt");
+      const catEl = document.getElementById("rc-cat");
+      const accEl = document.getElementById("rc-acc");
+      const freqEl = document.getElementById("rc-freq");
+      const dayEl = document.getElementById("rc-day");
+      const startEl = document.getElementById("rc-start");
+      const endEl = document.getElementById("rc-end");
 
-      // Validação explícita com feedback
-      if (!desc) return alert("⚠️ Preencha a descrição.");
-      if (!amt || amt === 0) return alert("⚠️ Valor inválido. Use vírgula para decimais (ex: 15000 ou 1500,50). Negativo = despesa.");
-      if (!cat) return alert("⚠️ Selecione uma categoria.");
-      if (!acc) return alert("⚠️ Selecione uma conta. Se não há contas, crie uma primeiro em Contas.");
+      if (!descEl || !amtEl || !catEl || !accEl) {
+        const faltando = [
+          !descEl && "descrição",
+          !amtEl && "valor",
+          !catEl && "categoria",
+          !accEl && "conta"
+        ].filter(Boolean).join(", ");
+        alert("❌ Elementos do formulário não encontrados: " + faltando + ". Recarregue a página (Ctrl+Shift+R).");
+        return;
+      }
+
+      const desc = descEl.value.trim();
+      const amt = num(amtEl.value);
+      const cat = catEl.value;
+      const acc = accEl.value;
+
+      console.log("[REC] Valores:", { desc, amt, cat, acc });
+
+      if (!desc) { alert("⚠️ Preencha a descrição."); return; }
+      if (!amt || amt === 0) { alert("⚠️ Valor inválido. Use números como 15000 ou 1500,50. Negativo = despesa."); return; }
+      if (!cat) { alert("⚠️ Selecione uma categoria. Se não há categorias, o import pode ter falhado."); return; }
+      if (!acc) { alert("⚠️ Selecione uma conta. Se não há contas, crie uma primeiro em Contas."); return; }
 
       const payload = {
         template: {
-          description: desc,
-          amount: amt,
-          category_id: cat,
-          account_id: acc,
+          description: desc, amount: amt,
+          category_id: cat, account_id: acc,
           type: amt >= 0 ? "income" : "expense"
         },
-        frequency: $("#rc-freq").value,
-        day: num($("#rc-day").value) || 1,
-        start_date: $("#rc-start").value || new Date().toISOString().slice(0, 10),
-        end_date: $("#rc-end").value || null,
+        frequency: freqEl?.value || "monthly",
+        day: num(dayEl?.value) || 1,
+        start_date: startEl?.value || new Date().toISOString().slice(0, 10),
+        end_date: endEl?.value || null,
         active: true
       };
-      try {
-        if (existing) Store.updateRecurrence(existing.id, payload);
-        else Store.addRecurrence(payload);
-        closeModal();
-        navigate();
-      } catch (err) {
-        alert("❌ Erro ao salvar: " + err.message);
-        console.error("Recorrência:", err, payload);
-      }
+      console.log("[REC] Payload:", payload);
+
+      if (existing) Store.updateRecurrence(existing.id, payload);
+      else Store.addRecurrence(payload);
+
+      console.log("[REC] Salvo OK. Total:", Store.recurrences().length);
+      closeModal();
+      navigate();
+    } catch (err) {
+      console.error("[REC] ERRO:", err);
+      alert("❌ Erro ao salvar recorrência:\n\n" + err.message + "\n\nVeja detalhes no Console (F12).");
     }
+  };
+
+  openModal((existing ? "Editar" : "+ Nova") + " recorrência", body, [{
+    label: "Salvar", class: "btn-gradient", onClick: saveRecurrence
   }]);
 }
 

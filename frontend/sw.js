@@ -1,6 +1,6 @@
 /* Finance AI — Service Worker
  * Cache-first para assets próprios; network-first para CDNs. */
-const CACHE = "finance-ai-v3.7.3";
+const CACHE = "finance-ai-v3.7.4";
 const LOCAL_ASSETS = [
   "./",
   "./index.html",
