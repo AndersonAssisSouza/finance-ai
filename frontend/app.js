@@ -315,7 +315,7 @@ function renderDashboard() {
   wrap.append(
     pageHead("Bom te ver! 👋", `Visão geral de ${monthLabel(monthKey())}`,
       h("button", { class: "btn btn-outline", onClick: () => { Store.seedDemo(); navigate(); } }, "Dados demo"),
-      h("button", { class: "btn btn-gradient", onClick: openNewTx }, "+ Transação")
+      h("button", { class: "btn btn-gradient", onClick: () => openNewTx() }, "+ Transação")
     )
   );
 
@@ -542,7 +542,7 @@ function drawFlowChart() {
 function renderAccounts() {
   const wrap = h("div", {});
   wrap.append(pageHead("Contas", "Saldos em tempo real — soma transações + saldo inicial",
-    h("button", { class: "btn btn-gradient", onClick: openAccountModal }, "+ Nova conta")
+    h("button", { class: "btn btn-gradient", onClick: () => openAccountModal() }, "+ Nova conta")
   ));
 
   const accs = Store.accounts();
@@ -591,7 +591,7 @@ function accountTypeLabel(t) {
 function renderCards() {
   const wrap = h("div", {});
   wrap.append(pageHead("Cartões de crédito", "Limite, fatura e vencimento",
-    h("button", { class: "btn btn-gradient", onClick: openCardModal }, "+ Novo cartão")
+    h("button", { class: "btn btn-gradient", onClick: () => openCardModal() }, "+ Novo cartão")
   ));
 
   const cards = Store.cards();
@@ -646,7 +646,7 @@ function renderTransactions() {
 
   wrap.append(pageHead("Transações", "Todo o histórico financeiro",
     h("button", { class: "btn btn-outline", onClick: () => openImportModal() }, "📥 Importar"),
-    h("button", { class: "btn btn-gradient", onClick: openNewTx }, "+ Nova")
+    h("button", { class: "btn btn-gradient", onClick: () => openNewTx() }, "+ Nova")
   ));
 
   // Filter bar
@@ -696,7 +696,7 @@ function renderBudgets() {
   const wrap = h("div", {});
   wrap.append(pageHead("Orçamentos", `Limites por categoria — ${monthLabel(App.currentMonth)}`,
     monthPicker(),
-    h("button", { class: "btn btn-gradient", onClick: openBudgetModal }, "+ Definir")
+    h("button", { class: "btn btn-gradient", onClick: () => openBudgetModal() }, "+ Definir")
   ));
 
   const rep = Store.budgetReport(App.currentMonth);
@@ -745,7 +745,7 @@ function monthPicker() {
 function renderGoals() {
   const wrap = h("div", {});
   wrap.append(pageHead("Metas financeiras", "Objetivos de longo prazo",
-    h("button", { class: "btn btn-gradient", onClick: openGoalModal }, "+ Nova meta")
+    h("button", { class: "btn btn-gradient", onClick: () => openGoalModal() }, "+ Nova meta")
   ));
   const goals = Store.goals();
   if (!goals.length) return (wrap.append(h("div", { class: "card empty" }, h("div", { class: "icon" }, "🎯"), "Nenhuma meta.")), wrap);
@@ -787,7 +787,7 @@ function renderGoals() {
 function renderDebts() {
   const wrap = h("div", {});
   wrap.append(pageHead("Dívidas", "Estratégia de quitação otimizada",
-    h("button", { class: "btn btn-gradient", onClick: openDebtModal }, "+ Nova dívida")
+    h("button", { class: "btn btn-gradient", onClick: () => openDebtModal() }, "+ Nova dívida")
   ));
 
   const debts = Store.debts();
@@ -854,7 +854,7 @@ function renderInvestments() {
         navigate();
       } catch (e) { alert("Erro: " + e.message); }
     }}, "🔄 Atualizar cotações"),
-    h("button", { class: "btn btn-gradient", onClick: openInvestmentModal }, "+ Novo ativo")
+    h("button", { class: "btn btn-gradient", onClick: () => openInvestmentModal() }, "+ Novo ativo")
   ));
 
   const inv = Store.investments();
@@ -1140,12 +1140,12 @@ function renderReconcile() {
       h("div", {},
         h("div", { class: "font-semi" }, "JSON Pluggy"),
         h("div", { class: "text-xs text-muted mb-2" }, "Cole o resultado de /transactions"),
-        h("button", { class: "btn btn-outline", onClick: openPluggyPaste }, "Colar JSON")
+        h("button", { class: "btn btn-outline", onClick: () => openPluggyPaste() }, "Colar JSON")
       ),
       h("div", {},
         h("div", { class: "font-semi" }, "Backend Pluggy"),
         h("div", { class: "text-xs text-muted mb-2" }, "Requer backend rodando com credenciais"),
-        h("button", { class: "btn btn-outline", onClick: openPluggyBackend }, "Sincronizar")
+        h("button", { class: "btn btn-outline", onClick: () => openPluggyBackend() }, "Sincronizar")
       )
     ),
     h("div", { class: "text-xs text-muted" },
@@ -3036,7 +3036,7 @@ function renderRecurrences() {
   const wrap = h("div", {});
 
   wrap.append(pageHead("Recorrências", "Lançamentos automáticos — salário, aluguel, assinaturas, boletos fixos",
-    h("button", { class: "btn btn-gradient", onClick: openRecurrenceModal }, "+ Nova recorrência")));
+    h("button", { class: "btn btn-gradient", onClick: () => openRecurrenceModal() }, "+ Nova recorrência")));
 
   if (created > 0) {
     wrap.append(h("div", { class: "badge ok mb-3", style: "padding:10px; display:block" },
@@ -3227,7 +3227,7 @@ function openRecurrenceModal(existing) {
 function renderCostCenters() {
   const wrap = h("div", {});
   wrap.append(pageHead("Centros de Custo", "Agrupe transações por projeto, departamento ou unidade",
-    h("button", { class: "btn btn-gradient", onClick: openCostCenterModal }, "+ Novo")));
+    h("button", { class: "btn btn-gradient", onClick: () => openCostCenterModal() }, "+ Novo")));
 
   const centers = Store.costCenters();
   if (!centers.length) {
@@ -3460,7 +3460,7 @@ function loadScript(src, type = null) {
 function renderAutomations() {
   const wrap = h("div", {});
   wrap.append(pageHead("Automações", "Regras \"quando X, fazer Y\" — automatize seu dinheiro",
-    h("button", { class: "btn btn-gradient", onClick: openAutomationModal }, "+ Nova automação")));
+    h("button", { class: "btn btn-gradient", onClick: () => openAutomationModal() }, "+ Nova automação")));
 
   const autos = Automations.list();
 
