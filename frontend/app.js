@@ -49,6 +49,7 @@ const routes = {
   "net-worth":   { title: "Patrimônio",   render: renderNetWorth,   icon: "💎" },
   "savings":     { title: "Economizar",   render: renderSavings,    icon: "💰" },
   "fire":        { title: "Investir & FIRE", render: renderFire,    icon: "🔥" },
+  "automations": { title: "Automações",   render: renderAutomations, icon: "⚡" },
   "reports":     { title: "Relatórios",   render: renderReports,    icon: "📑" },
   "statements":  { title: "DRE & Balanço", render: renderStatements, icon: "📚" },
   "irpf":        { title: "IRPF",          render: renderIRPF,       icon: "📑" },
@@ -240,6 +241,7 @@ function renderSidebar() {
     navItem("fire"),
     h("div", { class: "nav-section" }, "Inteligência"),
     navItem("savings"),
+    navItem("automations"),
     navItem("reports"),
     Store.isBusinessMode() && navItem("statements"),
     navItem("irpf"),
@@ -828,6 +830,13 @@ function renderDebts() {
 function renderInvestments() {
   const wrap = h("div", {});
   wrap.append(pageHead("Investimentos", "Carteira e rentabilidade",
+    h("button", { class: "btn btn-outline", onClick: async () => {
+      try {
+        const n = await updateStockPrices();
+        alert(`✅ ${n} ativo(s) com cotação atualizada`);
+        navigate();
+      } catch (e) { alert("Erro: " + e.message); }
+    }}, "🔄 Atualizar cotações"),
     h("button", { class: "btn btn-gradient", onClick: openInvestmentModal }, "+ Novo ativo")
   ));
 
@@ -1839,7 +1848,17 @@ function calCell(date, isOther) {
 /* ============ REPORTS view ============ */
 function renderReports() {
   const wrap = h("div", {});
-  wrap.append(pageHead("Relatórios", "Análises detalhadas da sua vida financeira", monthPicker()));
+  const year = new Date().getFullYear();
+  wrap.append(pageHead("Relatórios", "Análises detalhadas da sua vida financeira",
+    monthPicker(),
+    h("button", { class: "btn btn-outline", onClick: async () => {
+      const y = prompt("Ano do relatório:", year);
+      if (y) {
+        try { await downloadAnnualPdf(+y); }
+        catch(e) { alert("Erro: " + e.message); }
+      }
+    }}, "📄 PDF anual")
+  ));
 
   const months = [];
   for (let i = 11; i >= 0; i--) months.push(addMonths(App.currentMonth, -i));
@@ -3376,6 +3395,363 @@ function loadScript(src, type = null) {
   });
 }
 
+/* ============ AUTOMATIONS VIEW ============ */
+function renderAutomations() {
+  const wrap = h("div", {});
+  wrap.append(pageHead("Automações", "Regras \"quando X, fazer Y\" — automatize seu dinheiro",
+    h("button", { class: "btn btn-gradient", onClick: openAutomationModal }, "+ Nova automação")));
+
+  const autos = Automations.list();
+
+  // Templates sugeridos
+  if (!autos.length) {
+    wrap.append(h("div", { class: "card mb-3" },
+      h("h3", {}, "✨ Templates rápidos"),
+      h("p", { class: "text-xs text-muted mb-3" }, "Clique para criar regras prontas:"),
+      h("div", { class: "grid grid-2 gap-2" },
+        templateCard("💰", "Pagar-se primeiro", "Ao receber salário, transferir 20% para a reserva",
+          () => templateSalary20()),
+        templateCard("🛡️", "Reserva mínima", "Ao receber qualquer receita > R$ 1.000, aportar 10% na meta Reserva",
+          () => templateEmergency()),
+        templateCard("🔔", "Alerta gasto alto", "Notificar quando gastar mais de R$ 500 em uma transação",
+          () => templateBigSpend()),
+        templateCard("🏷️", "Auto-categorizar", "Toda vez que 'netflix' aparecer, categorizar como Streaming",
+          () => templateAutoCat())
+      )
+    ));
+  }
+
+  if (!autos.length) {
+    wrap.append(h("div", { class: "card empty" }, h("div", { class: "icon" }, "⚡"),
+      "Crie automações ou use um template acima para começar."));
+    return wrap;
+  }
+
+  const card = h("div", { class: "card" });
+  for (const a of autos) {
+    const lastRun = a.runs?.[0];
+    card.append(h("div", { class: "list-item", style: "flex-direction:column; align-items:stretch" },
+      h("div", { class: "flex items-center gap-3" },
+        h("div", { class: "avatar", style: "background:rgba(99,102,241,.15); color:var(--brand)" }, "⚡"),
+        h("div", { class: "grow" },
+          h("div", { class: "title" }, a.name,
+            !a.active && h("span", { class: "badge", style: "margin-left:6px" }, "pausada")),
+          h("div", { class: "sub" },
+            describeAutomation(a),
+            lastRun && ` • último: ${new Date(lastRun.at).toLocaleDateString("pt-BR")}`
+          )
+        ),
+        h("div", { class: "right text-xs text-muted" }, `${a.runs?.length || 0} exec.`),
+        h("button", { class: "btn btn-ghost btn-icon", title: a.active ? "Pausar" : "Ativar",
+          onClick: () => { Automations.update(a.id, { active: !a.active }); navigate(); } },
+          a.active ? "⏸️" : "▶️"),
+        h("button", { class: "btn btn-ghost btn-icon", title: "Excluir", style: "color:var(--danger)",
+          onClick: () => {
+            if (confirm("Excluir esta automação?"))
+              { Automations.remove(a.id); navigate(); }
+          } }, "✕")
+      )
+    ));
+  }
+  wrap.append(card);
+  return wrap;
+}
+function templateCard(icon, title, desc, onClick) {
+  return h("button", { class: "card", style: "text-align:left; cursor:pointer; background:var(--bg-subtle); border:1px solid var(--border)",
+    onClick },
+    h("div", { style: "font-size:24px" }, icon),
+    h("div", { class: "font-semi mt-2" }, title),
+    h("div", { class: "text-xs text-muted mt-1" }, desc)
+  );
+}
+function templateSalary20() {
+  const accs = Store.accounts();
+  if (accs.length < 2) return alert("Crie pelo menos 2 contas antes.");
+  const destId = prompt("ID da conta de destino? (veja os IDs em Contas)\n" +
+    accs.map((a,i) => `${i+1}. ${a.name} (${a.id})`).join("\n"));
+  if (!destId) return;
+  Automations.add({
+    name: "Pague-se primeiro (20% do salário)",
+    trigger: { event: "tx_created", filters: [
+      { field: "category_id", op: "equals", value: "cat_salary" },
+      { field: "amount", op: "gt", value: 0 }
+    ]},
+    actions: [{ type: "transfer_to_account", params: { to_account_id: destId, percent_of_amount: 20, description: "Pague-se primeiro (auto)" }}]
+  });
+  navigate();
+}
+function templateEmergency() {
+  const goals = Store.goals();
+  if (!goals.length) return alert("Crie uma meta primeiro.");
+  const g = goals.find(g => /reserva|emerg/i.test(g.name)) || goals[0];
+  Automations.add({
+    name: `10% de receitas > R$ 1000 → ${g.name}`,
+    trigger: { event: "tx_created", filters: [
+      { field: "type", op: "equals", value: "income" },
+      { field: "amount", op: "gt", value: 1000 }
+    ]},
+    actions: [{ type: "contribute_goal", params: { goal_id: g.id, percent_of_amount: 10 }}]
+  });
+  navigate();
+}
+function templateBigSpend() {
+  Automations.add({
+    name: "Alerta de gasto > R$ 500",
+    trigger: { event: "tx_created", filters: [
+      { field: "abs_amount", op: "gt", value: 500 },
+      { field: "type", op: "equals", value: "expense" }
+    ]},
+    actions: [{ type: "notify", params: { title: "💸 Gasto alto detectado", body: "Uma transação acima de R$ 500 foi registrada." }}]
+  });
+  navigate();
+}
+function templateAutoCat() {
+  const keyword = prompt("Palavra-chave:", "netflix");
+  if (!keyword) return;
+  const cat = prompt("ID da categoria (ex: cat_streaming):", "cat_streaming");
+  if (!cat) return;
+  Automations.add({
+    name: `Auto-categorizar "${keyword}"`,
+    trigger: { event: "tx_created", filters: [
+      { field: "description", op: "contains", value: keyword }
+    ]},
+    actions: [{ type: "set_category", params: { category_id: cat }}]
+  });
+  navigate();
+}
+function describeAutomation(a) {
+  const filters = a.trigger?.filters || [];
+  const filterText = filters.length
+    ? filters.map(f => `${f.field} ${f.op} ${Array.isArray(f.value) ? f.value.join("-") : f.value}`).join(" E ")
+    : "sem filtros";
+  const actions = (a.actions || []).map(ac => ac.type).join(", ");
+  return `Gatilho: ${a.trigger?.event || "?"} (${filterText}) → Ação: ${actions}`;
+}
+
+function openAutomationModal() {
+  const body = h("div", {},
+    h("label", { class: "field" },
+      h("span", { class: "lbl" }, "Nome da automação"),
+      h("input", { id: "au-name", class: "input", placeholder: "Ex: Transferir 10% do salário" })
+    ),
+    h("div", { class: "font-semi mt-3 mb-2" }, "Quando"),
+    h("div", { class: "field-row" },
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Evento"),
+        h("select", { id: "au-event", class: "select" },
+          h("option", { value: "tx_created" }, "Transação criada"),
+          h("option", { value: "daily" }, "Diariamente")
+        )),
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Campo do filtro"),
+        h("select", { id: "au-field", class: "select" },
+          h("option", { value: "description" }, "Descrição"),
+          h("option", { value: "amount" }, "Valor"),
+          h("option", { value: "abs_amount" }, "Valor absoluto"),
+          h("option", { value: "type" }, "Tipo (income/expense)"),
+          h("option", { value: "category_id" }, "Categoria (id)"),
+        ))
+    ),
+    h("div", { class: "field-row" },
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Operador"),
+        h("select", { id: "au-op", class: "select" },
+          h("option", { value: "contains" }, "contém"),
+          h("option", { value: "equals" }, "igual"),
+          h("option", { value: "not_equals" }, "diferente"),
+          h("option", { value: "gt" }, "maior que"),
+          h("option", { value: "gte" }, "maior ou igual"),
+          h("option", { value: "lt" }, "menor que"),
+          h("option", { value: "lte" }, "menor ou igual")
+        )),
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Valor"),
+        h("input", { id: "au-value", class: "input", placeholder: "ex: 1000" }))
+    ),
+    h("div", { class: "font-semi mt-3 mb-2" }, "Então fazer"),
+    h("label", { class: "field" }, h("span", { class: "lbl" }, "Ação"),
+      h("select", { id: "au-action", class: "select" },
+        h("option", { value: "notify" }, "Notificar"),
+        h("option", { value: "transfer_to_account" }, "Transferir para conta"),
+        h("option", { value: "contribute_goal" }, "Aportar em meta"),
+        h("option", { value: "set_category" }, "Definir categoria"),
+        h("option", { value: "set_cost_center" }, "Definir centro de custo")
+      )),
+    h("div", { class: "field-row" },
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Param chave"),
+        h("input", { id: "au-pkey", class: "input", placeholder: "ex: goal_id, to_account_id, category_id" })),
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Param valor"),
+        h("input", { id: "au-pvalue", class: "input", placeholder: "ex: gol_abc123 ou 20" }))
+    ),
+    h("label", { class: "field" },
+      h("span", { class: "lbl" }, "% do valor (opcional — 20 = 20% do valor da transação)"),
+      h("input", { id: "au-percent", class: "input", type: "number", min: 0, max: 100, step: 1 }))
+  );
+  openModal("+ Nova automação", body, [{
+    label: "Salvar", class: "btn-gradient", onClick: () => {
+      const name = $("#au-name").value.trim();
+      if (!name) return alert("Informe um nome");
+      const value = $("#au-value").value;
+      const parsedValue = /^-?\d+(\.\d+)?$/.test(value) ? +value : value;
+      const params = {};
+      if ($("#au-pkey").value) params[$("#au-pkey").value] = $("#au-pvalue").value;
+      if ($("#au-percent").value) params.percent_of_amount = +$("#au-percent").value;
+
+      Automations.add({
+        name,
+        trigger: {
+          event: $("#au-event").value,
+          filters: $("#au-field").value ? [
+            { field: $("#au-field").value, op: $("#au-op").value, value: parsedValue }
+          ] : []
+        },
+        actions: [{ type: $("#au-action").value, params }]
+      });
+      closeModal();
+      navigate();
+    }
+  }]);
+}
+
+/* ============ PDF ANNUAL REPORT ============ */
+async function downloadAnnualPdf(year) {
+  await loadScript("https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js");
+  await loadScript("https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.1/dist/jspdf.plugin.autotable.min.js");
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  const pageW = doc.internal.pageSize.getWidth();
+
+  // Capa
+  doc.setFillColor(99, 102, 241);
+  doc.rect(0, 0, pageW, 60, "F");
+  doc.setTextColor(255);
+  doc.setFontSize(28); doc.text("Relatório Anual", 20, 30);
+  doc.setFontSize(40); doc.text(String(year), 20, 50);
+  doc.setTextColor(0);
+  doc.setFontSize(12);
+  doc.text(`Finance AI • ${Store.user?.name || "—"}`, 20, 80);
+  doc.text(`Gerado em ${new Date().toLocaleDateString("pt-BR")}`, 20, 88);
+
+  // Resumo executivo
+  const yearTxs = Store.data.transactions.filter(t => t.date?.slice(0,4) === String(year));
+  const income = yearTxs.filter(t => t.amount > 0).reduce((s,t) => s+t.amount, 0);
+  const expense = Math.abs(yearTxs.filter(t => t.amount < 0 && t.type !== "transfer").reduce((s,t) => s+t.amount, 0));
+  const net = income - expense;
+  const nw = Store.netWorth();
+
+  doc.setFontSize(16); doc.text("Resumo executivo", 20, 110);
+  doc.setFontSize(11);
+  const summary = [
+    ["Receita total",     fmt(income)],
+    ["Despesa total",     fmt(expense)],
+    ["Saldo do ano",      fmt(net)],
+    ["Taxa de poupança", (income > 0 ? (net/income*100).toFixed(1) : 0) + "%"],
+    ["Patrimônio atual",  fmt(nw.net)],
+    ["Ativos",            fmt(nw.assets)],
+    ["Passivos",          fmt(nw.liabilities)],
+    ["Nº transações",     yearTxs.length],
+  ];
+  doc.autoTable({ startY: 115, body: summary, theme: "plain", styles: { fontSize: 10 }});
+
+  // Página 2: fluxo mensal
+  doc.addPage();
+  doc.setFontSize(16); doc.text("Fluxo mensal", 20, 20);
+  const months = [];
+  for (let m = 0; m < 12; m++) {
+    const mKey = `${year}-${String(m+1).padStart(2, "0")}`;
+    const s = Store.monthSummary(mKey);
+    months.push([
+      new Date(year, m).toLocaleDateString("pt-BR", { month: "long" }),
+      fmt(s.income), fmt(s.expense), fmt(s.net)
+    ]);
+  }
+  doc.autoTable({
+    startY: 25,
+    head: [["Mês", "Receita", "Despesa", "Saldo"]],
+    body: months,
+    headStyles: { fillColor: [99, 102, 241] }
+  });
+
+  // Página 3: top categorias
+  doc.addPage();
+  doc.setFontSize(16); doc.text("Gastos por categoria", 20, 20);
+  const byCat = {};
+  for (const t of yearTxs.filter(x => x.amount < 0 && x.type !== "transfer")) {
+    const cat = Store.categoryById(t.category_id);
+    if (!cat) continue;
+    byCat[cat.name] = (byCat[cat.name] || 0) + Math.abs(t.amount);
+  }
+  const rows = Object.entries(byCat).sort(([,a],[,b]) => b-a).map(([k,v]) => [k, fmt(v), (v/expense*100).toFixed(1)+"%"]);
+  doc.autoTable({
+    startY: 25,
+    head: [["Categoria", "Total", "% do gasto"]],
+    body: rows,
+    headStyles: { fillColor: [239, 68, 68] }
+  });
+
+  // Página 4: metas
+  const goals = Store.goals();
+  if (goals.length) {
+    doc.addPage();
+    doc.setFontSize(16); doc.text("Metas", 20, 20);
+    doc.autoTable({
+      startY: 25,
+      head: [["Meta", "Atual", "Alvo", "%", "Aporte mensal"]],
+      body: goals.map(g => [
+        g.name, fmt(g.current_amount), fmt(g.target_amount),
+        (g.target_amount > 0 ? (g.current_amount/g.target_amount*100).toFixed(0) : 0) + "%",
+        fmt(g.monthly_contribution)
+      ]),
+      headStyles: { fillColor: [16, 185, 129] }
+    });
+  }
+
+  // Página 5: patrimônio
+  doc.addPage();
+  doc.setFontSize(16); doc.text("Composição do patrimônio (hoje)", 20, 20);
+  doc.autoTable({
+    startY: 25,
+    head: [["Componente", "Valor"]],
+    body: [
+      ["Contas e carteiras", fmt(nw.breakdown.cash)],
+      ["Investimentos",      fmt(nw.breakdown.investments)],
+      ["Total de ativos",    fmt(nw.assets)],
+      ["Dívidas",            fmt(nw.breakdown.debts)],
+      ["Cartões em aberto",  fmt(nw.breakdown.cards_open)],
+      ["Total de passivos",  fmt(nw.liabilities)],
+      ["Patrimônio líquido", fmt(nw.net)],
+    ],
+    headStyles: { fillColor: [139, 92, 246] }
+  });
+
+  doc.save(`finance-ai-relatorio-${year}.pdf`);
+}
+
+/* ============ BRAPI - cotações de ações brasileiras ============ */
+async function updateStockPrices() {
+  const invs = Store.investments().filter(i => i.ticker && ["acoes","fii","etf"].includes(i.type));
+  if (!invs.length) return alert("Nenhum ativo de renda variável com ticker cadastrado.");
+
+  const tickers = [...new Set(invs.map(i => i.ticker.toUpperCase()))].join(",");
+  try {
+    const res = await fetch(`https://brapi.dev/api/quote/${tickers}?range=1d&interval=1d`);
+    if (!res.ok) throw new Error(await res.text());
+    const j = await res.json();
+    const results = j.results || [];
+    let updated = 0;
+    for (const r of results) {
+      const price = r.regularMarketPrice || r.currentPrice;
+      if (!price) continue;
+      for (const i of invs) {
+        if (i.ticker.toUpperCase() === r.symbol) {
+          Store.updateInvestment(i.id, { current_price: +price });
+          updated++;
+        }
+      }
+    }
+    return updated;
+  } catch (e) {
+    throw new Error("Brapi: " + e.message);
+  }
+}
+
 /* ============ BINDINGS GLOBAIS ============ */
 document.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === "k") {
@@ -3410,6 +3786,10 @@ window.enterApp = function() {
     maybeOnboard();
     if (window.Notifs) Notifs.start();
     if (window.Cloud && Cloud.info()) Cloud.enableAutoSync();
+    if (window.Automations) {
+      Automations.attachHooks(Store);
+      Automations.runDailyIfNeeded();
+    }
   }, 150);
 };
 

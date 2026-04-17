@@ -108,6 +108,7 @@ function emptyUserData() {
     rules: [],          // regras customizadas { id, pattern, category_id, account_id? }
     recurrences: [],    // [{id, template:{description,amount,category_id,...}, frequency:"monthly"|"weekly"|"daily"|"yearly", day, start_date, end_date, last_generated_date}]
     cost_centers: [],   // [{id, name, color, icon}] — modo empresarial
+    automations: [],    // [{id, name, trigger:{event, filters}, actions:[], active, runs}]
     categories: DEFAULT_CATEGORIES.map(c => ({...c})),
     alerts: [],
     tags: [],
