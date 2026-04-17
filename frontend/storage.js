@@ -70,6 +70,11 @@ function addMonths(ym, n) {
   const date = new Date(y, m - 1 + n, 1);
   return date.toISOString().slice(0,7);
 }
+function addDays(dateStr, n) {
+  const d = new Date(dateStr);
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+}
 function sha(s) { let h = 5381; for (const c of (s||"")) h = ((h*33) ^ c.charCodeAt(0)) >>> 0; return "h" + h.toString(36); }
 function normalize(s) {
   return (s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -101,10 +106,12 @@ function emptyUserData() {
     debts: [],
     investments: [],
     rules: [],          // regras customizadas { id, pattern, category_id, account_id? }
+    recurrences: [],    // [{id, template:{description,amount,category_id,...}, frequency:"monthly"|"weekly"|"daily"|"yearly", day, start_date, end_date, last_generated_date}]
+    cost_centers: [],   // [{id, name, color, icon}] — modo empresarial
     categories: DEFAULT_CATEGORIES.map(c => ({...c})),
     alerts: [],
     tags: [],
-    settings: { currency: "BRL", theme: "light", first_name: "" }
+    settings: { currency: "BRL", theme: "light", first_name: "", mode: "personal" }  // mode: personal | business
   };
 }
 
@@ -456,6 +463,150 @@ class FinanceStore {
     const income = txs.filter(t => t.type === "income").reduce((s,t) => s + t.amount, 0);
     const expense = Math.abs(txs.filter(t => t.type === "expense").reduce((s,t) => s + t.amount, 0));
     return { income: +income.toFixed(2), expense: +expense.toFixed(2), net: +(income - expense).toFixed(2) };
+  }
+
+  /* === RECURRENCES === */
+  recurrences() { return this.data?.recurrences || []; }
+
+  addRecurrence({ template, frequency = "monthly", day = null, start_date = null, end_date = null, active = true }) {
+    // template: { description, amount, category_id, account_id?, card_id?, type, tags, notes }
+    const r = {
+      id: uid("rec_"),
+      template: { ...template },
+      frequency,         // "daily" | "weekly" | "monthly" | "yearly"
+      day: day ?? new Date().getDate(),  // dia do mês (monthly/yearly) ou dia semana (0-6, weekly)
+      start_date: start_date || today(),
+      end_date: end_date || null,
+      last_generated_date: null,
+      active,
+      created_at: now()
+    };
+    this.data.recurrences.push(r);
+    this._save();
+    return r;
+  }
+
+  updateRecurrence(id, patch) {
+    const r = this.data.recurrences.find(x => x.id === id);
+    if (r) { Object.assign(r, patch); this._save(); }
+  }
+
+  deleteRecurrence(id) {
+    this.data.recurrences = this.data.recurrences.filter(r => r.id !== id);
+    this._save();
+  }
+
+  /** Calcula próximas N ocorrências da recorrência a partir de uma data. */
+  nextOccurrences(rec, fromDate = null, maxCount = 12) {
+    if (!rec.active) return [];
+    const from = fromDate ? new Date(fromDate) : new Date();
+    from.setHours(0, 0, 0, 0);
+    const start = new Date(rec.start_date);
+    const endDate = rec.end_date ? new Date(rec.end_date) : null;
+    const out = [];
+    let cursor = new Date(Math.max(start, from));
+
+    for (let i = 0; i < maxCount * 2 && out.length < maxCount; i++) {
+      let next;
+      if (rec.frequency === "monthly") {
+        next = new Date(cursor.getFullYear(), cursor.getMonth(), rec.day);
+        if (next < cursor) next = new Date(cursor.getFullYear(), cursor.getMonth() + 1, rec.day);
+      } else if (rec.frequency === "yearly") {
+        const m = new Date(rec.start_date).getMonth();
+        next = new Date(cursor.getFullYear(), m, rec.day);
+        if (next < cursor) next = new Date(cursor.getFullYear() + 1, m, rec.day);
+      } else if (rec.frequency === "weekly") {
+        next = new Date(cursor);
+        const diff = ((rec.day - cursor.getDay()) + 7) % 7;
+        next.setDate(cursor.getDate() + (diff || 7));
+      } else { // daily
+        next = new Date(cursor);
+        next.setDate(next.getDate() + 1);
+      }
+      if (endDate && next > endDate) break;
+      out.push(next.toISOString().slice(0, 10));
+      cursor = new Date(next); cursor.setDate(cursor.getDate() + 1);
+    }
+    return out;
+  }
+
+  /** Gera transações concretas para datas passadas ainda não processadas. */
+  materializeRecurrences() {
+    const today_ = today();
+    let created = 0;
+    for (const r of this.data.recurrences || []) {
+      if (!r.active) continue;
+      const from = r.last_generated_date ? addDays(r.last_generated_date, 1) : r.start_date;
+      const occurrences = this.nextOccurrences(r, from, 60).filter(d => d <= today_);
+      for (const occDate of occurrences) {
+        const t = r.template;
+        this.data.transactions.push({
+          id: uid("tx_"),
+          date: occDate,
+          description: t.description,
+          amount: t.amount,
+          account_id: t.account_id,
+          card_id: t.card_id,
+          category_id: t.category_id,
+          type: t.type || (t.amount >= 0 ? "income" : "expense"),
+          tags: t.tags || [],
+          notes: t.notes || "",
+          recurrence_id: r.id,
+          created_at: now()
+        });
+        r.last_generated_date = occDate;
+        created++;
+      }
+    }
+    if (created) this._save();
+    return created;
+  }
+
+  /** Previstas não materializadas (futuras), para calendário/forecast. */
+  upcomingFromRecurrences(daysAhead = 60) {
+    const today_ = today();
+    const horizon = addDays(today_, daysAhead);
+    const out = [];
+    for (const r of this.data.recurrences || []) {
+      if (!r.active) continue;
+      const dates = this.nextOccurrences(r, today_, 30);
+      for (const d of dates) {
+        if (d > horizon) break;
+        out.push({
+          date: d,
+          description: r.template.description,
+          amount: r.template.amount,
+          category_id: r.template.category_id,
+          account_id: r.template.account_id,
+          card_id: r.template.card_id,
+          type: r.template.type || (r.template.amount >= 0 ? "income" : "expense"),
+          recurrence_id: r.id,
+          forecast: true
+        });
+      }
+    }
+    return out.sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  /* === COST CENTERS (empresarial) === */
+  costCenters() { return this.data?.cost_centers || []; }
+  addCostCenter({ name, icon = "🏢", color = "#6366f1" }) {
+    const c = { id: uid("cc_"), name, icon, color };
+    this.data.cost_centers.push(c);
+    this._save();
+    return c;
+  }
+  deleteCostCenter(id) {
+    this.data.cost_centers = this.data.cost_centers.filter(c => c.id !== id);
+    this.data.transactions.forEach(t => { if (t.cost_center_id === id) delete t.cost_center_id; });
+    this._save();
+  }
+
+  /* === MODE === */
+  isBusinessMode() { return this.data?.settings?.mode === "business"; }
+  setMode(mode) {
+    this.data.settings.mode = mode;
+    this._save();
   }
 
   /* === DEMO === */

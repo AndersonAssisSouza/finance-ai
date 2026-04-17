@@ -42,6 +42,7 @@ const routes = {
   "transactions":{ title: "Transações",   render: renderTransactions, icon: "📝" },
   "budgets":     { title: "Orçamentos",   render: renderBudgets,    icon: "🧮" },
   "calendar":    { title: "Calendário",   render: renderCalendar,   icon: "📅" },
+  "recurrences": { title: "Recorrências", render: renderRecurrences, icon: "🔁" },
   "goals":       { title: "Metas",        render: renderGoals,      icon: "🎯" },
   "debts":       { title: "Dívidas",      render: renderDebts,      icon: "📉" },
   "investments": { title: "Investimentos", render: renderInvestments, icon: "📈" },
@@ -51,6 +52,7 @@ const routes = {
   "reports":     { title: "Relatórios",   render: renderReports,    icon: "📑" },
   "reconcile":   { title: "Conciliar",    render: renderReconcile,  icon: "🔄" },
   "family":      { title: "Família",      render: renderFamily,     icon: "👨‍👩‍👧" },
+  "cost-centers":{ title: "Centros de Custo", render: renderCostCenters, icon: "🏢" },
   "chat":        { title: "Chat IA",      render: renderChat,       icon: "🤖" },
   "settings":    { title: "Configurações",render: renderSettings,   icon: "⚙️" },
 };
@@ -104,6 +106,9 @@ function boot() {
       history.replaceState(null, "", location.pathname);
     }, 300);
   }
+
+  // Materializa recorrências atrasadas
+  try { Store.materializeRecurrences(); } catch (e) { console.warn("recurrences:", e); }
 
   // Esconde tela de login e vai direto ao app
   $("#auth").classList.add("hidden");
@@ -222,6 +227,7 @@ function renderSidebar() {
     navItem("transactions"),
     navItem("budgets"),
     navItem("calendar"),
+    navItem("recurrences"),
     h("div", { class: "nav-section" }, "Futuro"),
     navItem("goals"),
     navItem("debts"),
@@ -231,6 +237,8 @@ function renderSidebar() {
     navItem("savings"),
     navItem("reports"),
     navItem("reconcile"),
+    navItem("family"),
+    Store.isBusinessMode() && navItem("cost-centers"),
     navItem("chat"),
     h("div", { class: "nav-section" }, "Sistema"),
     navItem("settings"),
@@ -1351,6 +1359,24 @@ function renderSettings() {
     }}, "Alternar tema 🌓")
   ));
 
+  // === MODO EMPRESARIAL ===
+  const mode = Store.data.settings.mode || "personal";
+  wrap.append(h("div", { class: "card mb-3" },
+    h("h3", {}, "💼 Modo de uso"),
+    h("p", { class: "text-xs text-muted mb-3" },
+      "Modo pessoal: finanças do dia a dia. Modo empresarial: centros de custo, DRE, segmentação por projeto/filial."),
+    h("div", { class: "flex gap-2" },
+      h("button", {
+        class: "btn " + (mode === "personal" ? "btn-gradient" : "btn-outline"),
+        onClick: () => { Store.setMode("personal"); navigate(); renderSidebar(); }
+      }, "👤 Pessoal"),
+      h("button", {
+        class: "btn " + (mode === "business" ? "btn-gradient" : "btn-outline"),
+        onClick: () => { Store.setMode("business"); navigate(); renderSidebar(); }
+      }, "🏢 Empresarial")
+    )
+  ));
+
   // === NOTIFICAÇÕES ===
   wrap.append(renderNotifSection());
 
@@ -1749,6 +1775,10 @@ function calCell(date, isOther) {
     const inv = Store.cardInvoice(c.id);
     return inv.due_date === dStr && inv.total !== 0;
   });
+  // recorrências previstas (futuras) neste dia
+  const upcoming = (dStr > today)
+    ? Store.upcomingFromRecurrences(120).filter(u => u.date === dStr)
+    : [];
 
   const cell = h("div", { class: "cal-cell " + (isOther ? "other" : "") + (dStr === today ? " today" : ""),
     onClick: () => { if (txs.length) { location.hash = `#/transactions?month=${dStr.slice(0,7)}`; } }},
@@ -1759,7 +1789,12 @@ function calCell(date, isOther) {
     }, (t.amount > 0 ? "+" : "") + fmtShort(Math.abs(t.amount)) + " " + t.description.slice(0, 12))),
     txs.length > 3 && h("div", { class: "text-xs text-muted" }, `+${txs.length - 3}`),
     ...billsToday.map(c => h("div", { class: "cal-tx bill", title: c.name + " vence" },
-      "💳 " + c.name.slice(0, 10)))
+      "💳 " + c.name.slice(0, 10))),
+    ...upcoming.slice(0, 2).map(u => h("div", {
+      class: "cal-tx " + (u.amount > 0 ? "pos" : "neg"),
+      style: "opacity:.55; border:1px dashed currentColor",
+      title: "Previsto: " + u.description
+    }, "🔁 " + u.description.slice(0, 10)))
   );
   return cell;
 }
@@ -2546,6 +2581,390 @@ function renderCloudSection() {
   return card;
 }
 
+/* ============ RECURRENCES VIEW ============ */
+function renderRecurrences() {
+  // Materializa automaticamente antes de mostrar
+  const created = Store.materializeRecurrences();
+  const wrap = h("div", {});
+
+  wrap.append(pageHead("Recorrências", "Lançamentos automáticos — salário, aluguel, assinaturas, boletos fixos",
+    h("button", { class: "btn btn-gradient", onClick: openRecurrenceModal }, "+ Nova recorrência")));
+
+  if (created > 0) {
+    wrap.append(h("div", { class: "badge ok mb-3", style: "padding:10px; display:block" },
+      `✅ ${created} lançamento(s) geradas automaticamente desde a última visita.`));
+  }
+
+  const recs = Store.recurrences();
+  if (!recs.length) {
+    wrap.append(h("div", { class: "card empty" }, h("div", { class: "icon" }, "🔁"),
+      "Crie recorrências para automatizar lançamentos fixos (salário, aluguel, assinaturas)."));
+    return wrap;
+  }
+
+  // KPIs
+  const monthlyIn = recs.filter(r => r.active && r.template.amount > 0)
+    .reduce((s,r) => s + r.template.amount, 0);
+  const monthlyOut = Math.abs(recs.filter(r => r.active && r.template.amount < 0)
+    .reduce((s,r) => s + r.template.amount, 0));
+  wrap.append(h("div", { class: "grid grid-3 mb-3" },
+    kpiCard("Receitas fixas/mês", fmt(monthlyIn),
+      h("div", { class: "delta" }, `${recs.filter(r => r.template.amount > 0 && r.active).length} ativa(s)`)),
+    kpiCard("Despesas fixas/mês", fmt(monthlyOut),
+      h("div", { class: "delta" }, `${recs.filter(r => r.template.amount < 0 && r.active).length} ativa(s)`)),
+    kpiCard("Saldo fixo/mês", fmt(monthlyIn - monthlyOut),
+      h("div", { class: "delta" }, "Previsível mensal"), true)
+  ));
+
+  // Lista
+  const card = h("div", { class: "card" });
+  for (const r of recs) {
+    const cat = Store.categoryById(r.template.category_id);
+    const next = Store.nextOccurrences(r, null, 1)[0];
+    card.append(h("div", { class: "list-item", style: "flex-direction:column; align-items:stretch" },
+      h("div", { class: "flex items-center gap-3" },
+        h("div", { class: "avatar", style: `background:${cat?.color || "#64748b"}20; color:${cat?.color || "#64748b"}` }, cat?.icon || "🔁"),
+        h("div", { class: "grow" },
+          h("div", { class: "title" }, r.template.description,
+            !r.active && h("span", { class: "badge", style: "margin-left:6px" }, "pausada")),
+          h("div", { class: "sub" },
+            `${freqLabel(r)} • ${cat?.name || "—"}`,
+            next && ` • próximo: ${next}`)
+        ),
+        h("div", { class: `right font-semi ${r.template.amount >= 0 ? "amt pos" : "amt neg"}` },
+          fmt(r.template.amount)),
+        h("button", { class: "btn btn-ghost btn-icon", title: r.active ? "Pausar" : "Ativar",
+          onClick: () => { Store.updateRecurrence(r.id, { active: !r.active }); navigate(); } },
+          r.active ? "⏸️" : "▶️"),
+        h("button", { class: "btn btn-ghost btn-icon", title: "Editar",
+          onClick: () => openRecurrenceModal(r) }, "⚙️"),
+        h("button", { class: "btn btn-ghost btn-icon", title: "Excluir", style: "color:var(--danger)",
+          onClick: () => {
+            if (confirm(`Excluir "${r.template.description}"?\nTransações já geradas NÃO serão removidas.`))
+              { Store.deleteRecurrence(r.id); navigate(); }
+          } }, "✕")
+      )
+    ));
+  }
+  wrap.append(card);
+
+  // Upcoming
+  const upcoming = Store.upcomingFromRecurrences(60);
+  if (upcoming.length) {
+    wrap.append(h("div", { class: "card mt-3" },
+      h("h3", {}, "📅 Próximos lançamentos previstos (60 dias)"),
+      h("div", { class: "list" }, ...upcoming.slice(0, 15).map(u => {
+        const cat = Store.categoryById(u.category_id);
+        return h("div", { class: "list-item" },
+          h("div", { class: "avatar", style: "opacity:.6" }, cat?.icon || "🔁"),
+          h("div", { class: "grow" },
+            h("div", { class: "title" }, u.description),
+            h("div", { class: "sub" }, u.date + " • previsto")
+          ),
+          h("div", { class: `right ${u.amount >= 0 ? "amt pos" : "amt neg"}` }, fmt(u.amount))
+        );
+      }))
+    ));
+  }
+
+  return wrap;
+}
+function freqLabel(r) {
+  const days = ["Domingo","Segunda","Terça","Quarta","Quinta","Sexta","Sábado"];
+  return {
+    daily: "Todo dia",
+    weekly: `Semanal (${days[r.day] || "—"})`,
+    monthly: `Mensal (dia ${r.day})`,
+    yearly: `Anual`
+  }[r.frequency] || r.frequency;
+}
+function openRecurrenceModal(existing) {
+  const t = existing?.template || {};
+  const body = h("div", {},
+    h("label", { class: "field" }, h("span", { class: "lbl" }, "Descrição"),
+      h("input", { id: "rc-desc", class: "input", value: t.description || "" })),
+    h("div", { class: "field-row" },
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Valor (negativo = despesa)"),
+        h("input", { id: "rc-amt", class: "input", type: "number", step: ".01", value: t.amount || "" })),
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Categoria"),
+        selectCategory(t.category_id || "", null, "rc-cat"))
+    ),
+    h("label", { class: "field" }, h("span", { class: "lbl" }, "Conta"),
+      selectAccount(t.account_id || "", () => {}, false, "rc-acc")),
+    h("div", { class: "field-row" },
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Frequência"),
+        h("select", { id: "rc-freq", class: "select" },
+          h("option", { value: "monthly", selected: existing?.frequency === "monthly" || !existing }, "Mensal"),
+          h("option", { value: "weekly", selected: existing?.frequency === "weekly" }, "Semanal"),
+          h("option", { value: "daily", selected: existing?.frequency === "daily" }, "Diário"),
+          h("option", { value: "yearly", selected: existing?.frequency === "yearly" }, "Anual")
+        )),
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Dia (1-31 / 0-6 se semanal)"),
+        h("input", { id: "rc-day", class: "input", type: "number", value: existing?.day || new Date().getDate() }))
+    ),
+    h("div", { class: "field-row" },
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Início"),
+        h("input", { id: "rc-start", class: "input", type: "date", value: existing?.start_date || new Date().toISOString().slice(0,10) })),
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Fim (opcional)"),
+        h("input", { id: "rc-end", class: "input", type: "date", value: existing?.end_date || "" }))
+    )
+  );
+  openModal((existing ? "Editar" : "+ Nova") + " recorrência", body, [{
+    label: "Salvar", class: "btn-gradient", onClick: () => {
+      const payload = {
+        template: {
+          description: $("#rc-desc").value,
+          amount: +$("#rc-amt").value,
+          category_id: $("#rc-cat").value,
+          account_id: $("#rc-acc").value,
+          type: +$("#rc-amt").value >= 0 ? "income" : "expense"
+        },
+        frequency: $("#rc-freq").value,
+        day: +$("#rc-day").value,
+        start_date: $("#rc-start").value,
+        end_date: $("#rc-end").value || null,
+        active: true
+      };
+      if (existing) Store.updateRecurrence(existing.id, payload);
+      else Store.addRecurrence(payload);
+      closeModal(); navigate();
+    }
+  }]);
+}
+
+/* ============ COST CENTERS VIEW (modo empresarial) ============ */
+function renderCostCenters() {
+  const wrap = h("div", {});
+  wrap.append(pageHead("Centros de Custo", "Agrupe transações por projeto, departamento ou unidade",
+    h("button", { class: "btn btn-gradient", onClick: openCostCenterModal }, "+ Novo")));
+
+  const centers = Store.costCenters();
+  if (!centers.length) {
+    wrap.append(h("div", { class: "card empty" }, h("div", { class: "icon" }, "🏢"),
+      "Nenhum centro de custo. Crie um para segmentar despesas e receitas."));
+    return wrap;
+  }
+
+  // DRE simplificada por centro
+  const data = centers.map(c => {
+    const txs = Store.data.transactions.filter(t => t.cost_center_id === c.id);
+    const income = txs.filter(t => t.amount > 0).reduce((s,t) => s + t.amount, 0);
+    const expense = Math.abs(txs.filter(t => t.amount < 0).reduce((s,t) => s + t.amount, 0));
+    return { cc: c, income, expense, net: income - expense, count: txs.length };
+  });
+
+  wrap.append(h("div", { class: "card mb-3" },
+    h("h3", {}, "📊 DRE por centro de custo (total histórico)"),
+    h("div", { class: "table-wrap" },
+      h("table", { class: "table" },
+        h("thead", {}, h("tr", {},
+          h("th", {}, "Centro"), h("th", {}, "Transações"),
+          h("th", {}, "Receitas"), h("th", {}, "Despesas"),
+          h("th", {}, "Resultado"), h("th", {})
+        )),
+        h("tbody", {}, ...data.map(d => h("tr", {},
+          h("td", {}, h("span", { style: `color:${d.cc.color}` }, d.cc.icon), " ", d.cc.name),
+          h("td", {}, d.count),
+          h("td", { class: "amt pos" }, fmt(d.income)),
+          h("td", { class: "amt neg" }, fmt(d.expense)),
+          h("td", { class: d.net >= 0 ? "amt pos font-semi" : "amt neg font-semi" }, fmt(d.net)),
+          h("td", {},
+            h("button", { class: "btn btn-ghost btn-icon", onClick: () => {
+              if (confirm("Excluir centro? Transações mantém o histórico mas perdem o vínculo."))
+                { Store.deleteCostCenter(d.cc.id); navigate(); }
+            }}, "✕"))
+        )))
+      )
+    )
+  ));
+
+  // Transações sem CC
+  const uncategorized = Store.data.transactions.filter(t => !t.cost_center_id);
+  if (uncategorized.length) {
+    wrap.append(h("div", { class: "card" },
+      h("h3", {}, `🏷️ ${uncategorized.length} transação(ões) sem centro de custo`),
+      h("div", { class: "text-xs text-muted mb-3" }, "Atribua em massa um centro:"),
+      h("div", { class: "flex gap-2 items-end" },
+        h("div", { class: "grow" },
+          h("div", { class: "text-xs text-muted mb-1" }, "Centro de custo"),
+          h("select", { id: "bulk-cc", class: "select" },
+            ...centers.map(c => h("option", { value: c.id }, c.icon + " " + c.name)))
+        ),
+        h("button", { class: "btn btn-primary", onClick: () => {
+          const cc = $("#bulk-cc").value;
+          uncategorized.forEach(t => t.cost_center_id = cc);
+          Store._save();
+          alert(`✅ ${uncategorized.length} transações atribuídas`);
+          navigate();
+        }}, "Aplicar em todas")
+      )
+    ));
+  }
+
+  return wrap;
+}
+function openCostCenterModal() {
+  const body = h("div", {},
+    h("label", { class: "field" }, h("span", { class: "lbl" }, "Nome"),
+      h("input", { id: "cc-name", class: "input", placeholder: "Ex: Matriz, Filial SP, Projeto X" })),
+    h("div", { class: "field-row" },
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Ícone"),
+        h("input", { id: "cc-icon", class: "input", value: "🏢" })),
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Cor"),
+        h("input", { id: "cc-color", class: "input", type: "color", value: "#6366f1" }))
+    )
+  );
+  openModal("+ Novo centro de custo", body, [{
+    label: "Salvar", class: "btn-gradient", onClick: () => {
+      Store.addCostCenter({
+        name: $("#cc-name").value,
+        icon: $("#cc-icon").value,
+        color: $("#cc-color").value
+      });
+      closeModal(); navigate();
+    }
+  }]);
+}
+
+/* ============ OCR PDF IMPORT ============ */
+async function handlePdfOcr(file) {
+  if (!file) return;
+  const accs = Store.accounts();
+  if (!accs.length) return alert("Crie uma conta primeiro");
+  const pick = prompt("Em qual conta importar?\n" + accs.map((a,i) => `${i+1}. ${a.icon} ${a.name}`).join("\n"), "1");
+  const acc = accs[(+pick || 1) - 1];
+  if (!acc) return;
+
+  showOcrProgress("Carregando bibliotecas...");
+
+  // Carrega pdf.js e Tesseract sob demanda
+  await loadScript("https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/pdf.min.mjs", "module")
+    .catch(() => loadScript("https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/legacy/build/pdf.min.js"));
+  await loadScript("https://cdn.jsdelivr.net/npm/tesseract.js@5.0.4/dist/tesseract.min.js");
+
+  let pdfText = "";
+  try {
+    showOcrProgress("Extraindo texto do PDF...");
+    const arrayBuffer = await file.arrayBuffer();
+    const pdfjsLib = window.pdfjsLib || window["pdfjs-dist/build/pdf"];
+    if (pdfjsLib) {
+      if (pdfjsLib.GlobalWorkerOptions)
+        pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/legacy/build/pdf.worker.min.js";
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        pdfText += content.items.map(it => it.str).join(" ") + "\n";
+      }
+    }
+  } catch (e) {
+    console.warn("pdf.js falhou, usando OCR:", e);
+  }
+
+  // Se texto extraído for pequeno, roda OCR
+  if (pdfText.trim().length < 100 && window.Tesseract) {
+    showOcrProgress("PDF scaneado — rodando OCR (pode demorar)...");
+    try {
+      const { createWorker } = window.Tesseract;
+      const worker = await createWorker("por");
+      const { data } = await worker.recognize(file);
+      pdfText = data.text;
+      await worker.terminate();
+    } catch (e) { console.warn("OCR:", e); }
+  }
+
+  hideOcrProgress();
+  if (!pdfText) return alert("Não foi possível extrair texto do PDF.");
+
+  // Parser heurístico: linhas com data brasileira + valor
+  const txs = parseStatementText(pdfText);
+  if (!txs.length) {
+    alert("Nenhuma transação detectada no PDF.\n\nTexto extraído:\n" + pdfText.slice(0, 500));
+    return;
+  }
+
+  showOcrPreview(txs, acc);
+}
+
+function parseStatementText(text) {
+  const out = [];
+  // Regex: dd/mm[/yyyy] ... valor com -/+
+  const lines = text.split(/\n|(?<=\d{2}\/\d{2}\/\d{2,4})/);
+  const rx = /(\d{2}\/\d{2}(?:\/\d{2,4})?)\s+([^\d-][^\n]*?)\s+(-?\d{1,3}(?:\.\d{3})*(?:,\d{2}))/g;
+  const text2 = text.replace(/\s+/g, " ");
+  let m;
+  while ((m = rx.exec(text2)) !== null) {
+    const [, dateRaw, desc, amtRaw] = m;
+    const parts = dateRaw.split("/");
+    const y = parts[2] ? (parts[2].length === 2 ? "20" + parts[2] : parts[2]) : new Date().getFullYear();
+    const date = `${y}-${parts[1]}-${parts[0]}`;
+    const amount = parseFloat(amtRaw.replace(/\./g, "").replace(",", "."));
+    if (isNaN(amount) || Math.abs(amount) < 0.01) continue;
+    out.push({ date, description: desc.trim().slice(0, 80), amount });
+  }
+  return out;
+}
+
+function showOcrProgress(msg) {
+  let el = document.getElementById("ocr-progress");
+  if (!el) {
+    el = h("div", { id: "ocr-progress", class: "modal-backdrop" },
+      h("div", { class: "modal", style: "text-align:center; padding:30px" },
+        h("div", { style: "font-size:48px" }, "⏳"),
+        h("div", { id: "ocr-msg", class: "font-semi mt-3" }, msg),
+        h("div", { class: "text-xs text-muted mt-2" }, "Isso pode levar alguns segundos em PDFs grandes")
+      )
+    );
+    document.body.appendChild(el);
+  } else {
+    document.getElementById("ocr-msg").textContent = msg;
+  }
+}
+function hideOcrProgress() { document.getElementById("ocr-progress")?.remove(); }
+
+function showOcrPreview(txs, acc) {
+  const body = h("div", {},
+    h("div", { class: "text-sm mb-3" },
+      `${txs.length} transações detectadas para importar em `,
+      h("b", {}, acc.icon, " ", acc.name)
+    ),
+    h("div", { class: "scroll-y", style: "max-height:400px" },
+      h("table", { class: "table" },
+        h("thead", {}, h("tr", {}, h("th", {}, "Data"), h("th", {}, "Descrição"), h("th", {}, "Valor"))),
+        h("tbody", {}, ...txs.map(t => h("tr", {},
+          h("td", {}, t.date), h("td", {}, t.description),
+          h("td", { class: t.amount >= 0 ? "amt pos" : "amt neg" }, fmt(t.amount))
+        )))
+      )
+    )
+  );
+  openModal("Pré-visualização OCR", body, [{
+    label: "Importar todas", class: "btn-gradient", onClick: () => {
+      const r = AI.reconcile(Store.data.transactions, txs);
+      for (const n of r.new) {
+        Store.addTransaction({
+          date: n.date, description: n.description, amount: n.amount,
+          account_id: acc.id, category_id: n.suggested_category,
+          type: n.amount >= 0 ? "income" : "expense"
+        });
+      }
+      closeModal();
+      alert(`✅ ${r.new.length} novas • 🔁 ${r.duplicates.length} duplicatas ignoradas`);
+      navigate();
+    }
+  }]);
+}
+
+function loadScript(src, type = null) {
+  return new Promise((resolve, reject) => {
+    if ([...document.scripts].some(s => s.src === src)) return resolve();
+    const s = document.createElement("script");
+    s.src = src; if (type) s.type = type;
+    s.onload = resolve; s.onerror = reject;
+    document.head.appendChild(s);
+  });
+}
+
 /* ============ BINDINGS GLOBAIS ============ */
 document.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === "k") {
@@ -2616,18 +3035,28 @@ window.renderInvestments = function() {
   return w;
 };
 
-// Add OFX to reconcile view
+// Add OFX + OCR to reconcile view
 const _origReconcile = renderReconcile;
 window.renderReconcile = function() {
   const w = _origReconcile();
   const card = w.querySelector(".card");
   if (card) {
-    const ofxRow = h("div", { style: "margin-top:16px; padding-top:16px; border-top:1px solid var(--border)" },
-      h("div", { class: "font-semi mb-2" }, "🏛️ Arquivo OFX (bancos brasileiros)"),
-      h("div", { class: "text-xs text-muted mb-2" }, "Padrão OFX exportado pelo internet banking"),
-      h("input", { type: "file", accept: ".ofx,.OFX", class: "input", onChange: e => handleOfx(e.target.files[0]) })
+    const extras = h("div", { style: "margin-top:16px; padding-top:16px; border-top:1px solid var(--border)" },
+      h("div", { class: "grid grid-2 gap-3" },
+        h("div", {},
+          h("div", { class: "font-semi mb-2" }, "🏛️ Arquivo OFX"),
+          h("div", { class: "text-xs text-muted mb-2" }, "Padrão brasileiro, exportado pelo internet banking"),
+          h("input", { type: "file", accept: ".ofx,.OFX", class: "input", onChange: e => handleOfx(e.target.files[0]) })
+        ),
+        h("div", {},
+          h("div", { class: "font-semi mb-2" }, "📄 PDF com OCR",
+            h("span", { class: "badge brand", style: "margin-left:6px" }, "AI")),
+          h("div", { class: "text-xs text-muted mb-2" }, "Extratos em PDF (texto ou escaneado). Rodamos OCR local com Tesseract."),
+          h("input", { type: "file", accept: ".pdf", class: "input", onChange: e => handlePdfOcr(e.target.files[0]) })
+        )
+      )
     );
-    card.appendChild(ofxRow);
+    card.appendChild(extras);
   }
   return w;
 };
