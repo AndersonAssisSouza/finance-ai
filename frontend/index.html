@@ -17,8 +17,8 @@
 </head>
 <body>
 
-<!-- AUTH -->
-<section id="auth">
+<!-- AUTH (escondido por padrão — acesso direto) -->
+<section id="auth" class="hidden">
   <div class="auth-card">
     <div class="auth-hero">
       <div class="logo"><div class="icon">💎</div><div>Finance AI</div></div>
@@ -47,7 +47,7 @@
       </form>
       <div class="text-xs text-muted mt-4" style="text-align:center">
         💾 Modo local — seus dados ficam neste navegador.<br>
-        <a href="#" onclick="document.querySelector('#au-email').value='demo@finance.ai';document.querySelector('#au-pass').value='demo1234';return false" class="pointer" style="color:var(--brand)">preencher com conta demo</a>
+        <a href="#" id="demo-link" class="pointer" style="color:var(--brand); font-weight:600">⚡ Entrar na conta demo (1 clique)</a>
       </div>
     </div>
   </div>
@@ -75,6 +75,8 @@
 
 <script src="./storage.js"></script>
 <script src="./ai_engine.js"></script>
+<script src="./notifications.js"></script>
+<script src="./cloud_sync.js"></script>
 <script src="./app.js"></script>
 <script>
 // PWA registration

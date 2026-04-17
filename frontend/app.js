@@ -73,8 +73,24 @@ window.addEventListener("hashchange", navigate);
 /* ============ BOOT / AUTH ============ */
 function boot() {
   if (localStorage.getItem("fa_v3_theme") === "dark") document.documentElement.classList.add("dark");
-  if (Store.currentUserId && Store.user) enterApp();
-  else renderAuth();
+
+  // Acesso direto: se não há usuário, cria um perfil "Eu" automaticamente
+  if (!Store.currentUserId || !Store.user) {
+    try {
+      const defaultEmail = "eu@finance.local";
+      if (Store.db.users[defaultEmail]) {
+        Store.login({ email: defaultEmail, password: "local" });
+      } else {
+        Store.register({ email: defaultEmail, password: "local", name: "Eu" });
+      }
+    } catch (err) {
+      console.error("Boot auto-login falhou:", err);
+      renderAuth(); return;
+    }
+  }
+  // Esconde tela de login e vai direto ao app
+  $("#auth").classList.add("hidden");
+  enterApp();
 }
 
 function renderAuth() {
@@ -82,28 +98,74 @@ function renderAuth() {
   $("#app").classList.remove("active");
   let mode = "login";
   const form = $("#auth-form");
-  form.onsubmit = (e) => {
+  const errEl = $("#auth-err");
+
+  function showErr(msg) {
+    errEl.textContent = msg;
+    errEl.classList.remove("hidden");
+    errEl.style.display = "block";
+  }
+  function hideErr() {
+    errEl.classList.add("hidden");
+    errEl.style.display = "none";
+  }
+
+  form.onsubmit = async (e) => {
     e.preventDefault();
-    const email = $("#au-email").value, password = $("#au-pass").value, name = $("#au-name").value;
+    hideErr();
+    const email = $("#au-email").value.trim(), password = $("#au-pass").value, name = $("#au-name").value.trim();
+    if (!email || !password) return showErr("Preencha email e senha");
+    if (password.length < 4) return showErr("Senha precisa de pelo menos 4 caracteres");
     try {
-      if (mode === "login") Store.login({ email, password });
-      else Store.register({ email, password, name });
-      $("#auth-err").classList.add("hidden");
+      if (mode === "login") {
+        try {
+          Store.login({ email, password });
+        } catch (err) {
+          // Sem conta: oferecer criar automaticamente
+          if (err.message.includes("inválidas") && !Store.db.users[email.toLowerCase()]) {
+            if (confirm(`Não há conta com "${email}". Criar agora com esta senha?`)) {
+              Store.register({ email, password, name: name || email.split("@")[0] });
+            } else return;
+          } else throw err;
+        }
+      } else {
+        Store.register({ email, password, name });
+      }
       enterApp();
     } catch (err) {
-      $("#auth-err").textContent = err.message;
-      $("#auth-err").classList.remove("hidden");
+      showErr(err.message || "Erro ao autenticar");
     }
   };
+
   $("#au-tab-login").onclick = () => switchAuth("login");
   $("#au-tab-reg").onclick = () => switchAuth("register");
   function switchAuth(m) {
     mode = m;
+    hideErr();
     $("#au-tab-login").classList.toggle("active", m === "login");
     $("#au-tab-reg").classList.toggle("active", m === "register");
     $("#au-name-wrap").classList.toggle("hidden", m !== "register");
     $("#au-submit").textContent = m === "login" ? "Entrar" : "Criar conta";
   }
+
+  // Link "conta demo" — auto-cria se não existir e loga
+  $("#demo-link")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    hideErr();
+    const email = "demo@finance.ai", password = "demo1234";
+    try {
+      if (!Store.db.users[email]) {
+        Store.register({ email, password, name: "Demo" });
+      } else {
+        Store.login({ email, password });
+      }
+      // Popular demo data se vazio
+      if (!Store.data.transactions.length) Store.seedDemo();
+      enterApp();
+    } catch (err) {
+      showErr(err.message);
+    }
+  });
 }
 
 function enterApp() {
@@ -1175,33 +1237,61 @@ function renderSettings() {
   const wrap = h("div", {});
   wrap.append(pageHead("Configurações"));
 
+  // === PERFIS ===
+  const profiles = Object.values(Store.db.users);
   wrap.append(h("div", { class: "card mb-3" },
-    h("h3", {}, "Perfil"),
+    h("h3", {}, "👤 Perfil atual"),
     h("label", { class: "field" },
       h("span", { class: "lbl" }, "Nome"),
       h("input", { class: "input", id: "set-name", value: Store.user.name })
     ),
-    h("label", { class: "field" },
-      h("span", { class: "lbl" }, "Email"),
-      h("input", { class: "input", value: Store.user.email, disabled: true })
+    h("div", { class: "flex gap-2" },
+      h("button", { class: "btn btn-primary", onClick: () => {
+        Store.user.name = $("#set-name").value;
+        Store.data.settings.first_name = $("#set-name").value;
+        Store._save(); renderSidebar(); alert("Perfil atualizado");
+      }}, "Salvar nome"),
+      profiles.length > 1 && h("select", { class: "select", onChange: e => {
+        Store._saveSession(e.target.value); location.reload();
+      }},
+        ...profiles.map(u => h("option", { value: u.id, selected: u.id === Store.currentUserId }, u.name + " (" + u.email + ")")))
     ),
-    h("button", { class: "btn btn-primary", onClick: () => {
-      Store.user.name = $("#set-name").value;
-      Store.data.settings.first_name = $("#set-name").value;
-      Store._save();
-      renderSidebar();
-      alert("Perfil atualizado");
-    }}, "Salvar")
+    h("div", { class: "flex gap-2 mt-3" },
+      h("button", { class: "btn btn-outline", onClick: () => {
+        const name = prompt("Nome do novo perfil:", "Meu perfil");
+        if (!name) return;
+        const email = prompt("Email identificador:", name.toLowerCase().replace(/\s/g, "") + "@finance.local");
+        if (!email) return;
+        try {
+          Store.register({ email, password: "local", name });
+          location.reload();
+        } catch (e) { alert(e.message); }
+      }}, "+ Novo perfil"),
+      profiles.length > 1 && h("button", { class: "btn btn-ghost", style: "color:var(--danger)", onClick: () => {
+        if (!confirm(`Excluir perfil "${Store.user.name}" e seus dados?`)) return;
+        delete Store.db.users[Store.user.email];
+        delete Store.db.data[Store.currentUserId];
+        Store._saveSession(null);
+        Store._save();
+        location.reload();
+      }}, "Excluir perfil")
+    )
   ));
 
   wrap.append(h("div", { class: "card mb-3" },
-    h("h3", {}, "Aparência"),
+    h("h3", {}, "🎨 Aparência"),
     h("button", { class: "btn btn-outline", onClick: () => {
       document.documentElement.classList.toggle("dark");
       localStorage.setItem("fa_v3_theme", document.documentElement.classList.contains("dark") ? "dark" : "light");
       if (App.charts.flow) drawFlowChart();
     }}, "Alternar tema 🌓")
   ));
+
+  // === NOTIFICAÇÕES ===
+  wrap.append(renderNotifSection());
+
+  // === CLOUD SYNC & FAMÍLIA ===
+  wrap.append(renderCloudSection());
 
   wrap.append(h("div", { class: "card mb-3" },
     h("h3", {}, "Regras de categorização"),
@@ -2051,6 +2141,127 @@ function showOnboard(steps, idx) {
   document.body.appendChild(bd);
 }
 
+/* ============ NOTIF SECTION ============ */
+function renderNotifSection() {
+  const prefs = Store.data.settings.notifications || { bills: true, budgets: true, insights: true, goals: true };
+  const status = window.Notifs ? Notifs.status() : "—";
+  const card = h("div", { class: "card mb-3" },
+    h("h3", {}, "🔔 Notificações"),
+    h("div", { class: "text-sm mb-3" },
+      "Status: ", h("span", { class: `badge ${status === "Ativadas" ? "ok" : status === "Bloqueadas" ? "danger" : "warn"}` }, status)
+    ),
+    h("div", { class: "grid grid-2 mb-3" },
+      notifToggle("bills", "Vencimento de cartões", prefs.bills),
+      notifToggle("budgets", "Orçamentos 80% / 100%", prefs.budgets),
+      notifToggle("insights", "Alertas críticos da IA", prefs.insights),
+      notifToggle("goals", "Metas próximas ou atingidas", prefs.goals),
+    ),
+    h("div", { class: "flex gap-2" },
+      h("button", { class: "btn btn-primary", onClick: async () => {
+        const ok = await Notifs.requestPermission();
+        alert(ok ? "✅ Notificações ativadas" : "❌ Permissão negada. Ajuste no navegador.");
+        navigate();
+      }}, "Pedir permissão"),
+      h("button", { class: "btn btn-outline", onClick: () => {
+        Notifs.resetHistory();
+        Notifs.scan();
+        alert("Histórico limpo + varredura executada");
+      }}, "Testar agora"),
+    )
+  );
+  return card;
+}
+function notifToggle(key, label, checked) {
+  return h("label", { class: "flex items-center gap-2 text-sm", style: "padding:8px; border:1px solid var(--border); border-radius:8px" },
+    h("input", { type: "checkbox", checked: checked ? true : undefined, onChange: e => {
+      Store.data.settings.notifications = Store.data.settings.notifications || {};
+      Store.data.settings.notifications[key] = e.target.checked;
+      Store._save();
+    }}),
+    label
+  );
+}
+
+/* ============ CLOUD SYNC SECTION ============ */
+function renderCloudSection() {
+  const ws = window.Cloud ? Cloud.info() : null;
+  const card = h("div", { class: "card mb-3" },
+    h("h3", {}, "☁️ Sync na nuvem + Família"));
+
+  if (ws) {
+    const link = Cloud.shareLink();
+    card.append(
+      h("div", { class: "text-sm mb-3" },
+        "Conectado via ",
+        h("span", { class: "badge brand" }, ws.provider === "jsonbin" ? "JSONBin" : "GitHub Gist"),
+        " • última sync: ", ws.last_sync_at ? new Date(ws.last_sync_at).toLocaleString("pt-BR") : "—"
+      ),
+      h("label", { class: "field" },
+        h("span", { class: "lbl" }, "Link para compartilhar (família/outros dispositivos)"),
+        h("input", { class: "input", value: link, readOnly: true, onClick: e => e.target.select() })
+      ),
+      h("div", { class: "flex gap-2" },
+        h("button", { class: "btn btn-primary", onClick: async () => {
+          try { await Cloud.push(); alert("✅ Enviado para a nuvem"); navigate(); }
+          catch (e) { alert("Erro: " + e.message); }
+        }}, "⬆ Enviar agora"),
+        h("button", { class: "btn btn-outline", onClick: async () => {
+          try {
+            await Cloud.pull();
+            alert("✅ Baixado da nuvem");
+            location.reload();
+          } catch (e) { alert("Erro: " + e.message); }
+        }}, "⬇ Baixar agora"),
+        h("button", { class: "btn btn-ghost", style: "color:var(--danger)", onClick: () => {
+          if (confirm("Desconectar da nuvem? Dados locais permanecem.")) { Cloud.disconnect(); navigate(); }
+        }}, "Desconectar")
+      )
+    );
+  } else {
+    card.append(
+      h("div", { class: "text-sm text-muted mb-3" },
+        "Sincronize seus dados entre dispositivos (celular, desktop) e compartilhe com a família via link."
+      ),
+      h("div", { class: "grid grid-3 gap-2" },
+        h("button", { class: "btn btn-gradient", onClick: async () => {
+          const key = prompt("Master Key do JSONBin (opcional — deixe em branco se não tiver conta):") || null;
+          try {
+            await Cloud.initJsonbin({ key });
+            Cloud.enableAutoSync();
+            alert("✅ Workspace criado na nuvem. Use Settings para ver o link de compartilhamento.");
+            navigate();
+          } catch (e) { alert("Erro: " + e.message); }
+        }}, "☁️ JSONBin (sem conta)"),
+        h("button", { class: "btn btn-outline", onClick: async () => {
+          const token = prompt("Personal Access Token do GitHub (scope 'gist'):\n\nGere em https://github.com/settings/tokens");
+          if (!token) return;
+          try {
+            await Cloud.initGist({ token });
+            Cloud.enableAutoSync();
+            alert("✅ Gist privado criado. Dados sincronizados.");
+            navigate();
+          } catch (e) { alert("Erro: " + e.message); }
+        }}, "🐙 GitHub Gist"),
+        h("button", { class: "btn btn-outline", onClick: async () => {
+          const link = prompt("Cole o link do workspace (fa://ws/...):");
+          if (!link) return;
+          try {
+            await Cloud.joinWorkspace(link);
+            Cloud.enableAutoSync();
+            alert("✅ Conectado ao workspace compartilhado!");
+            location.reload();
+          } catch (e) { alert("Erro: " + e.message); }
+        }}, "👨‍👩‍👧 Entrar com link")
+      ),
+      h("div", { class: "text-xs text-muted mt-3" },
+        h("b", {}, "JSONBin:"), " grátis, criação instantânea, sem cadastro. ",
+        h("b", {}, "GitHub Gist:"), " privado via token pessoal. ",
+        h("b", {}, "Entrar com link:"), " use um link compartilhado por outro dispositivo/membro da família.")
+    );
+  }
+  return card;
+}
+
 /* ============ BINDINGS GLOBAIS ============ */
 document.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === "k") {
@@ -2078,7 +2289,15 @@ window.navigate = function() { _origNavigate(); setTimeout(updateNotifDot, 50); 
 
 // Hook enterApp
 const _origEnter = enterApp;
-window.enterApp = function() { _origEnter(); setTimeout(() => { updateNotifDot(); maybeOnboard(); }, 150); };
+window.enterApp = function() {
+  _origEnter();
+  setTimeout(() => {
+    updateNotifDot();
+    maybeOnboard();
+    if (window.Notifs) Notifs.start();
+    if (window.Cloud && Cloud.info()) Cloud.enableAutoSync();
+  }, 150);
+};
 
 // Hook allocation in investments
 const _origInv = renderInvestments;
