@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Finance AI — Inteligência Financeira Pessoal</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+tailwind.config = {
+  darkMode: 'class',
+  theme: {
+    extend: {
+      colors: {
+        brand: { 50:'#eff6ff', 500:'#3b82f6', 600:'#2563eb', 700:'#1d4ed8' },
+        surface: { DEFAULT:'#0f172a', soft:'#1e293b', card:'#1e293b' }
+      }
+    }
+  }
+}
+</script>
+<style>
+body { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; }
+.fade-in { animation: fade .3s ease both; }
+@keyframes fade { from { opacity:0; transform:translateY(4px);} to { opacity:1;} }
+.glass { backdrop-filter: blur(8px); }
+.scroll-area::-webkit-scrollbar { width:8px; }
+.scroll-area::-webkit-scrollbar-thumb { background:#334155; border-radius:4px; }
+</style>
+</head>
+<body class="bg-slate-50 dark:bg-slate-900 dark:text-slate-100 min-h-screen">
+
+<!-- ============== LOGIN / REGISTRO ============== -->
+<div id="auth-screen" class="min-h-screen flex items-center justify-center p-6">
+  <div class="w-full max-w-md bg-white dark:bg-slate-800 shadow-xl rounded-2xl overflow-hidden fade-in">
+    <div class="p-8 bg-gradient-to-br from-brand-600 to-brand-700 text-white">
+      <div class="flex items-center gap-3 mb-2">
+        <div class="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center text-xl font-bold">💰</div>
+        <h1 class="text-2xl font-bold">Finance AI</h1>
+      </div>
+      <p class="text-brand-50 text-sm">Inteligência financeira com IA — categorização automática, previsões e insights.</p>
+    </div>
+    <div class="p-8">
+      <div class="flex gap-2 mb-6 bg-slate-100 dark:bg-slate-700 p-1 rounded-lg">
+        <button id="tab-login" class="flex-1 py-2 rounded-md font-medium bg-white dark:bg-slate-800 shadow-sm">Entrar</button>
+        <button id="tab-register" class="flex-1 py-2 rounded-md font-medium text-slate-600 dark:text-slate-300">Criar conta</button>
+      </div>
+      <form id="auth-form" class="space-y-4">
+        <div id="name-wrap" class="hidden">
+          <label class="block text-sm font-medium mb-1">Nome</label>
+          <input id="name" type="text" class="w-full px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700 focus:ring-2 focus:ring-brand-500 outline-none" placeholder="Seu nome">
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">Email</label>
+          <input id="email" type="email" required class="w-full px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700 focus:ring-2 focus:ring-brand-500 outline-none" placeholder="voce@email.com">
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">Senha</label>
+          <input id="password" type="password" required minlength="4" class="w-full px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700 focus:ring-2 focus:ring-brand-500 outline-none" placeholder="••••••••">
+        </div>
+        <button type="submit" class="w-full py-2.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white font-medium transition">Entrar</button>
+        <div id="auth-error" class="hidden text-sm text-red-600 bg-red-50 dark:bg-red-900/30 p-3 rounded-lg"></div>
+      </form>
+      <div class="mt-6 pt-6 border-t border-slate-200 dark:border-slate-700">
+        <label class="block text-sm font-medium mb-1">API do backend</label>
+        <input id="api-base" type="text" value="http://localhost:8000" class="w-full px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700 text-sm">
+        <p class="text-xs text-slate-500 mt-1">Aponte para o seu backend FastAPI</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============== APP ============== -->
+<div id="app-screen" class="hidden min-h-screen">
+
+  <!-- Header -->
+  <header class="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 sticky top-0 z-10 glass">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-white font-bold">💰</div>
+        <div>
+          <h1 class="font-bold">Finance AI</h1>
+          <p class="text-xs text-slate-500" id="user-greeting">Olá!</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <button id="btn-demo" class="text-xs px-3 py-1.5 rounded-lg bg-amber-100 text-amber-800 hover:bg-amber-200 dark:bg-amber-900/40 dark:text-amber-200">Carregar demo</button>
+        <button id="btn-refresh" class="text-xs px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-700 hover:bg-slate-200">↻ Consolidar</button>
+        <button id="btn-theme" class="text-xs px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-700 hover:bg-slate-200">🌓</button>
+        <button id="btn-logout" class="text-xs px-3 py-1.5 rounded-lg bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/40 dark:text-red-200">Sair</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+
+    <!-- KPIs -->
+    <section class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div class="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm">
+        <p class="text-xs text-slate-500 uppercase">Saldo atual</p>
+        <p id="kpi-balance" class="text-2xl font-bold mt-1">—</p>
+        <p id="kpi-balance-sub" class="text-xs text-slate-500 mt-1"></p>
+      </div>
+      <div class="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm">
+        <p class="text-xs text-slate-500 uppercase">Score financeiro</p>
+        <div class="flex items-center gap-2 mt-1">
+          <p id="kpi-score" class="text-2xl font-bold">—</p>
+          <span id="kpi-score-label" class="text-xs px-2 py-0.5 rounded-full"></span>
+        </div>
+        <div class="mt-2 w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+          <div id="kpi-score-bar" class="h-full bg-gradient-to-r from-red-500 via-amber-500 to-emerald-500" style="width:0%"></div>
+        </div>
+      </div>
+      <div class="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm">
+        <p class="text-xs text-slate-500 uppercase">Nível de risco</p>
+        <p id="kpi-risk" class="text-2xl font-bold mt-1">—</p>
+        <p id="kpi-risk-sub" class="text-xs text-slate-500 mt-1"></p>
+      </div>
+      <div class="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm">
+        <p class="text-xs text-slate-500 uppercase">Tendência 90d</p>
+        <p id="kpi-trend" class="text-2xl font-bold mt-1">—</p>
+        <p id="kpi-trend-sub" class="text-xs text-slate-500 mt-1"></p>
+      </div>
+    </section>
+
+    <!-- Charts row -->
+    <section class="grid lg:grid-cols-3 gap-4">
+      <div class="lg:col-span-2 bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="font-semibold">Projeção 30 dias</h3>
+          <span class="text-xs text-slate-500" id="projection-meta"></span>
+        </div>
+        <div class="h-64"><canvas id="chart-forecast"></canvas></div>
+      </div>
+      <div class="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm">
+        <h3 class="font-semibold mb-3">Gastos por categoria</h3>
+        <div class="h-64"><canvas id="chart-categories"></canvas></div>
+      </div>
+    </section>
+
+    <!-- Insights + Monthly flow -->
+    <section class="grid lg:grid-cols-3 gap-4">
+      <div class="lg:col-span-2 bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm">
+        <h3 class="font-semibold mb-3">Fluxo mensal</h3>
+        <div class="h-64"><canvas id="chart-monthly"></canvas></div>
+      </div>
+      <div class="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm">
+        <h3 class="font-semibold mb-3">💡 Insights da IA</h3>
+        <div id="insights-list" class="space-y-2 max-h-64 overflow-y-auto scroll-area pr-1"></div>
+      </div>
+    </section>
+
+    <!-- Transactions + actions -->
+    <section class="grid lg:grid-cols-3 gap-4">
+      <div class="lg:col-span-2 bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="font-semibold">Transações recentes</h3>
+          <span id="tx-count" class="text-xs text-slate-500"></span>
+        </div>
+        <div id="tx-list" class="space-y-2 max-h-96 overflow-y-auto scroll-area pr-1"></div>
+      </div>
+
+      <div class="space-y-4">
+        <!-- Nova transação -->
+        <div class="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm">
+          <h3 class="font-semibold mb-3">+ Nova transação</h3>
+          <form id="tx-form" class="space-y-2">
+            <input id="tx-desc" placeholder="Descrição (ex: iFood)" required class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700 text-sm">
+            <input id="tx-amount" type="number" step="0.01" placeholder="Valor (negativo = gasto)" required class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700 text-sm">
+            <input id="tx-date" type="date" class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700 text-sm">
+            <button class="w-full py-2 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium">Adicionar</button>
+          </form>
+        </div>
+
+        <!-- Metas -->
+        <div class="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm">
+          <h3 class="font-semibold mb-3">🎯 Metas</h3>
+          <div id="goals-list" class="space-y-2 mb-3"></div>
+          <form id="goal-form" class="space-y-2">
+            <input id="goal-name" placeholder="Ex: Viagem, emergência" required class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700 text-sm">
+            <input id="goal-target" type="number" step="0.01" placeholder="Valor alvo (R$)" required class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700 text-sm">
+            <button class="w-full py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium">Criar meta</button>
+          </form>
+        </div>
+
+        <!-- Regras de automação -->
+        <div class="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm">
+          <h3 class="font-semibold mb-3">⚡ Regras automáticas</h3>
+          <div id="rules-list" class="space-y-2 mb-3"></div>
+          <form id="rule-form" class="grid grid-cols-2 gap-2">
+            <input id="rule-keyword" placeholder="Palavra-chave" required class="col-span-1 px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700 text-sm">
+            <input id="rule-category" placeholder="Categoria" required class="col-span-1 px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700 text-sm">
+            <button class="col-span-2 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium">Adicionar regra</button>
+          </form>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+/* ============ estado global ============ */
+const state = {
+  api: localStorage.getItem('fa_api') || 'http://localhost:8000',
+  token: localStorage.getItem('fa_token') || '',
+  mode: 'login',
+  charts: {}
+};
+
+/* ============ helpers ============ */
+const $ = (id) => document.getElementById(id);
+const fmtBRL = (v) => (v ?? 0).toLocaleString('pt-BR', {style:'currency', currency:'BRL'});
+
+async function api(path, opts = {}) {
+  const headers = { 'Content-Type': 'application/json', ...(opts.headers||{}) };
+  if (state.token) headers.Authorization = `Bearer ${state.token}`;
+  const res = await fetch(state.api + path, { ...opts, headers });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(err || res.statusText);
+  }
+  return res.json();
+}
+
+/* ============ auth ============ */
+$('tab-login').onclick = () => switchMode('login');
+$('tab-register').onclick = () => switchMode('register');
+
+function switchMode(mode) {
+  state.mode = mode;
+  $('name-wrap').classList.toggle('hidden', mode !== 'register');
+  $('tab-login').classList.toggle('bg-white', mode === 'login');
+  $('tab-login').classList.toggle('dark:bg-slate-800', mode === 'login');
+  $('tab-login').classList.toggle('shadow-sm', mode === 'login');
+  $('tab-register').classList.toggle('bg-white', mode === 'register');
+  $('tab-register').classList.toggle('dark:bg-slate-800', mode === 'register');
+  $('tab-register').classList.toggle('shadow-sm', mode === 'register');
+  $('auth-form').querySelector('button[type=submit]').textContent =
+    mode === 'login' ? 'Entrar' : 'Criar conta';
+}
+
+$('auth-form').onsubmit = async (e) => {
+  e.preventDefault();
+  $('auth-error').classList.add('hidden');
+  state.api = $('api-base').value.replace(/\/$/, '');
+  localStorage.setItem('fa_api', state.api);
+  const body = {
+    email: $('email').value,
+    password: $('password').value,
+    ...(state.mode === 'register' ? { name: $('name').value } : {})
+  };
+  try {
+    const path = state.mode === 'login' ? '/auth/login' : '/auth/register';
+    const data = await api(path, { method: 'POST', body: JSON.stringify(body) });
+    state.token = data.token;
+    localStorage.setItem('fa_token', state.token);
+    await enterApp(data.user);
+  } catch (err) {
+    $('auth-error').textContent = err.message || 'Falha na autenticação';
+    $('auth-error').classList.remove('hidden');
+  }
+};
+
+$('btn-logout').onclick = () => {
+  localStorage.removeItem('fa_token');
+  state.token = '';
+  location.reload();
+};
+
+/* ============ app ============ */
+async function enterApp(user) {
+  $('auth-screen').classList.add('hidden');
+  $('app-screen').classList.remove('hidden');
+  if (user) $('user-greeting').textContent = `Olá, ${user.name || user.email}`;
+  await loadDashboard();
+}
+
+$('btn-refresh').onclick = loadDashboard;
+$('btn-demo').onclick = async () => {
+  if (!confirm('Isso substituirá suas transações por dados de demonstração. Continuar?')) return;
+  await api('/demo', { method: 'POST' });
+  await loadDashboard();
+};
+$('btn-theme').onclick = () => {
+  document.documentElement.classList.toggle('dark');
+  localStorage.setItem('fa_theme', document.documentElement.classList.contains('dark') ? 'dark' : 'light');
+};
+
+async function loadDashboard() {
+  try {
+    const [dash, txs, rules] = await Promise.all([
+      api('/dashboard'),
+      api('/transactions?limit=50'),
+      api('/rules')
+    ]);
+    renderKPIs(dash);
+    renderCharts(dash);
+    renderInsights(dash.insights);
+    renderTransactions(txs);
+    renderGoals(dash.goals || []);
+    renderRules(rules);
+  } catch (err) {
+    console.error(err);
+    if (err.message.includes('401')) {
+      localStorage.removeItem('fa_token');
+      location.reload();
+    }
+  }
+}
+
+/* ============ render ============ */
+function renderKPIs(d) {
+  const f = d.forecast;
+  $('kpi-balance').textContent = fmtBRL(f.balance);
+  $('kpi-balance-sub').textContent = `Média diária: ${fmtBRL(f.daily_avg)}`;
+
+  $('kpi-score').textContent = d.score;
+  const scoreLabel = d.score >= 70 ? ['Saudável','bg-emerald-100 text-emerald-700']
+    : d.score >= 40 ? ['Atenção','bg-amber-100 text-amber-700']
+    : ['Crítico','bg-red-100 text-red-700'];
+  $('kpi-score-label').textContent = scoreLabel[0];
+  $('kpi-score-label').className = 'text-xs px-2 py-0.5 rounded-full ' + scoreLabel[1];
+  $('kpi-score-bar').style.width = d.score + '%';
+
+  const riskMap = {
+    baixo:  ['Baixo','text-emerald-600'],
+    medio:  ['Médio','text-amber-600'],
+    alto:   ['Alto','text-orange-600'],
+    critico:['Crítico','text-red-600']
+  };
+  const [rLabel, rClass] = riskMap[d.risk.level] || ['—',''];
+  $('kpi-risk').textContent = rLabel;
+  $('kpi-risk').className = 'text-2xl font-bold mt-1 ' + rClass;
+  $('kpi-risk-sub').textContent = d.risk.days_until_negative
+    ? `Negativo em ${d.risk.days_until_negative}d`
+    : 'Fluxo positivo';
+
+  const trendMap = {
+    growing: ['📈 Crescendo','text-emerald-600'],
+    stable:  ['→ Estável','text-slate-600'],
+    declining: ['📉 Caindo','text-red-600']
+  };
+  const [tLabel, tClass] = trendMap[f.trend] || ['—',''];
+  $('kpi-trend').textContent = tLabel;
+  $('kpi-trend').className = 'text-2xl font-bold mt-1 ' + tClass;
+  $('kpi-trend-sub').textContent = `Entrada ${fmtBRL(f.daily_income)}/d · Saída ${fmtBRL(Math.abs(f.daily_expense))}/d`;
+}
+
+function renderCharts(d) {
+  const isDark = document.documentElement.classList.contains('dark');
+  const gridColor = isDark ? '#334155' : '#e2e8f0';
+  const textColor = isDark ? '#cbd5e1' : '#475569';
+
+  // Forecast
+  const f = d.forecast;
+  const labels = f.projection.map(p => p.date.slice(5));
+  const balances = f.projection.map(p => p.balance);
+  $('projection-meta').textContent = `Saldo final: ${fmtBRL(balances[balances.length-1] || 0)}`;
+
+  if (state.charts.forecast) state.charts.forecast.destroy();
+  state.charts.forecast = new Chart($('chart-forecast'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Saldo projetado',
+        data: balances,
+        borderColor: '#2563eb',
+        backgroundColor: 'rgba(37, 99, 235, 0.1)',
+        fill: true,
+        tension: 0.3,
+        pointRadius: 0
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        y: { grid:{color:gridColor}, ticks:{color:textColor, callback:v=>fmtBRL(v)}},
+        x: { grid:{display:false}, ticks:{color:textColor, maxTicksLimit: 8}}
+      }
+    }
+  });
+
+  // Categorias (só gastos)
+  const cats = (d.by_category || []).filter(c => c.total < 0)
+    .sort((a,b) => a.total - b.total).slice(0, 8);
+  if (state.charts.cats) state.charts.cats.destroy();
+  state.charts.cats = new Chart($('chart-categories'), {
+    type: 'doughnut',
+    data: {
+      labels: cats.map(c => c.category),
+      datasets: [{
+        data: cats.map(c => Math.abs(c.total)),
+        backgroundColor: ['#3b82f6','#ef4444','#f59e0b','#10b981','#8b5cf6','#ec4899','#06b6d4','#84cc16']
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels:{color:textColor, font:{size:11}}}
+      }
+    }
+  });
+
+  // Fluxo mensal
+  const mf = d.monthly_flow || [];
+  if (state.charts.monthly) state.charts.monthly.destroy();
+  state.charts.monthly = new Chart($('chart-monthly'), {
+    type: 'bar',
+    data: {
+      labels: mf.map(m => m.month),
+      datasets: [
+        { label: 'Entradas', data: mf.map(m => m.income), backgroundColor: '#10b981' },
+        { label: 'Saídas', data: mf.map(m => m.expense), backgroundColor: '#ef4444' }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom', labels:{color:textColor}}},
+      scales: {
+        y: { grid:{color:gridColor}, ticks:{color:textColor, callback:v=>fmtBRL(v)}},
+        x: { grid:{display:false}, ticks:{color:textColor}}
+      }
+    }
+  });
+}
+
+function renderInsights(insights) {
+  const map = {
+    high:    'bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-800 text-red-800 dark:text-red-200',
+    warning: 'bg-amber-50 dark:bg-amber-900/30 border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200',
+    success: 'bg-emerald-50 dark:bg-emerald-900/30 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200',
+    info:    'bg-slate-50 dark:bg-slate-700 border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200'
+  };
+  $('insights-list').innerHTML = insights.length
+    ? insights.map(i => `
+      <div class="border-l-4 p-3 rounded-r-lg ${map[i.severity] || map.info}">
+        <p class="font-semibold text-sm">${i.title}</p>
+        <p class="text-xs mt-0.5 opacity-90">${i.message}</p>
+      </div>`).join('')
+    : '<p class="text-sm text-slate-500">Nenhum insight ainda. Adicione transações.</p>';
+}
+
+function renderTransactions(txs) {
+  $('tx-count').textContent = `${txs.length} lançamentos`;
+  $('tx-list').innerHTML = txs.length
+    ? txs.map(t => `
+      <div class="flex items-center justify-between p-3 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition">
+        <div class="flex-1 min-w-0">
+          <p class="font-medium text-sm truncate">${t.description}</p>
+          <div class="flex items-center gap-2 mt-0.5">
+            <span class="text-xs px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700">${t.category}</span>
+            ${t.is_recurring ? '<span class="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 dark:bg-purple-900/40">🔁 recorrente</span>' : ''}
+            <span class="text-xs text-slate-500">${t.date || ''}</span>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 ml-3">
+          <p class="font-semibold ${t.amount >= 0 ? 'text-emerald-600' : 'text-red-600'} text-sm">${fmtBRL(t.amount)}</p>
+          <button onclick="delTx('${t.id}')" class="text-xs text-slate-400 hover:text-red-600">✕</button>
+        </div>
+      </div>`).join('')
+    : '<p class="text-sm text-slate-500 text-center py-8">Sem transações. Adicione uma ou carregue a demo.</p>';
+}
+
+window.delTx = async (id) => {
+  if (!confirm('Excluir transação?')) return;
+  await api('/transactions/' + id, { method: 'DELETE' });
+  await loadDashboard();
+};
+
+function renderGoals(goals) {
+  $('goals-list').innerHTML = goals.length
+    ? goals.map(g => `
+      <div class="p-3 rounded-lg border border-slate-200 dark:border-slate-700">
+        <div class="flex items-center justify-between mb-1">
+          <p class="text-sm font-medium">${g.name}</p>
+          <button onclick="delGoal('${g.id}')" class="text-xs text-slate-400 hover:text-red-600">✕</button>
+        </div>
+        <div class="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+          <div class="h-full bg-emerald-500" style="width:${Math.min(g.progress, 100)}%"></div>
+        </div>
+        <p class="text-xs text-slate-500 mt-1">${fmtBRL(g.current)} / ${fmtBRL(g.target)} (${g.progress}%)</p>
+      </div>`).join('')
+    : '<p class="text-xs text-slate-500">Nenhuma meta.</p>';
+}
+
+window.delGoal = async (id) => {
+  await api('/goals/' + id, { method: 'DELETE' });
+  await loadDashboard();
+};
+
+function renderRules(rules) {
+  $('rules-list').innerHTML = rules.length
+    ? rules.map(r => `
+      <div class="flex items-center justify-between p-2 rounded-lg bg-slate-50 dark:bg-slate-700 text-xs">
+        <span><b>${r.keyword}</b> → ${r.category}</span>
+        <button onclick="delRule('${r.id}')" class="text-slate-400 hover:text-red-600">✕</button>
+      </div>`).join('')
+    : '<p class="text-xs text-slate-500">Sem regras. Crie uma para categorizar automaticamente.</p>';
+}
+
+window.delRule = async (id) => {
+  await api('/rules/' + id, { method: 'DELETE' });
+  await loadDashboard();
+};
+
+/* ============ forms ============ */
+$('tx-form').onsubmit = async (e) => {
+  e.preventDefault();
+  await api('/transactions', {
+    method: 'POST',
+    body: JSON.stringify({
+      description: $('tx-desc').value,
+      amount: parseFloat($('tx-amount').value),
+      date: $('tx-date').value || null
+    })
+  });
+  e.target.reset();
+  await loadDashboard();
+};
+
+$('goal-form').onsubmit = async (e) => {
+  e.preventDefault();
+  await api('/goals', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: $('goal-name').value,
+      target_amount: parseFloat($('goal-target').value)
+    })
+  });
+  e.target.reset();
+  await loadDashboard();
+};
+
+$('rule-form').onsubmit = async (e) => {
+  e.preventDefault();
+  await api('/rules', {
+    method: 'POST',
+    body: JSON.stringify({
+      keyword: $('rule-keyword').value,
+      category: $('rule-category').value
+    })
+  });
+  e.target.reset();
+  await loadDashboard();
+};
+
+/* ============ init ============ */
+if (localStorage.getItem('fa_theme') === 'dark') {
+  document.documentElement.classList.add('dark');
+}
+$('api-base').value = state.api;
+if (state.token) {
+  api('/me').then(u => enterApp(u)).catch(() => {
+    localStorage.removeItem('fa_token');
+    state.token = '';
+  });
+}
+</script>
+</body>
+</html>
