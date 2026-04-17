@@ -45,12 +45,14 @@ const routes = {
   "cards":       { title: "Cartões",      render: renderCards,      icon: "💳" },
   "transactions":{ title: "Transações",   render: renderTransactions, icon: "📝" },
   "budgets":     { title: "Orçamentos",   render: renderBudgets,    icon: "🧮" },
+  "calendar":    { title: "Calendário",   render: renderCalendar,   icon: "📅" },
   "goals":       { title: "Metas",        render: renderGoals,      icon: "🎯" },
   "debts":       { title: "Dívidas",      render: renderDebts,      icon: "📉" },
   "investments": { title: "Investimentos", render: renderInvestments, icon: "📈" },
   "net-worth":   { title: "Patrimônio",   render: renderNetWorth,   icon: "💎" },
   "savings":     { title: "Economizar",   render: renderSavings,    icon: "💰" },
   "fire":        { title: "Investir & FIRE", render: renderFire,    icon: "🔥" },
+  "reports":     { title: "Relatórios",   render: renderReports,    icon: "📑" },
   "reconcile":   { title: "Conciliar",    render: renderReconcile,  icon: "🔄" },
   "chat":        { title: "Chat IA",      render: renderChat,       icon: "🤖" },
   "settings":    { title: "Configurações",render: renderSettings,   icon: "⚙️" },
@@ -133,6 +135,7 @@ function renderSidebar() {
     navItem("cards"),
     navItem("transactions"),
     navItem("budgets"),
+    navItem("calendar"),
     h("div", { class: "nav-section" }, "Futuro"),
     navItem("goals"),
     navItem("debts"),
@@ -140,6 +143,7 @@ function renderSidebar() {
     navItem("fire"),
     h("div", { class: "nav-section" }, "Inteligência"),
     navItem("savings"),
+    navItem("reports"),
     navItem("reconcile"),
     navItem("chat"),
     h("div", { class: "nav-section" }, "Sistema"),
@@ -1526,5 +1530,607 @@ function selectCategory(value, onChange, id = "") {
   if (onChange) sel.onchange = e => onChange(e.target.value);
   return sel;
 }
+
+/* ============ CALENDAR view ============ */
+function renderCalendar() {
+  const wrap = h("div", {});
+  const [year, month] = App.currentMonth.split("-").map(Number);
+  wrap.append(pageHead("Calendário", monthLabel(App.currentMonth) + " — transações e vencimentos",
+    monthPicker(),
+    h("button", { class: "btn btn-outline", onClick: () => {
+      const d = new Date(year, month - 2, 1);
+      App.currentMonth = d.toISOString().slice(0,7); navigate();
+    }}, "◀"),
+    h("button", { class: "btn btn-outline", onClick: () => {
+      const d = new Date(year, month, 1);
+      App.currentMonth = d.toISOString().slice(0,7); navigate();
+    }}, "▶"),
+  ));
+
+  // Summary
+  const ms = Store.monthSummary(App.currentMonth);
+  wrap.append(h("div", { class: "grid grid-3 mb-3" },
+    kpiCard("Entradas", fmt(ms.income)),
+    kpiCard("Saídas", fmt(ms.expense)),
+    kpiCard("Saldo do mês", fmt(ms.net),
+      h("div", { class: `delta ${ms.net >= 0 ? "pos" : "neg"}` }, ms.net >= 0 ? "Positivo" : "Negativo"),
+      true)
+  ));
+
+  // Grid
+  const firstDay = new Date(year, month - 1, 1);
+  const lastDay = new Date(year, month, 0);
+  const startOffset = firstDay.getDay(); // 0 = dom
+  const grid = h("div", { class: "cal-grid" });
+
+  // Headers
+  ["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"].forEach(d =>
+    grid.appendChild(h("div", { class: "text-xs text-muted font-semi", style: "text-align:center; padding:6px 0" }, d)));
+
+  // Prev month pad
+  for (let i = 0; i < startOffset; i++) {
+    const d = new Date(year, month - 1, -startOffset + i + 1);
+    grid.appendChild(calCell(d, true));
+  }
+  // Current month
+  for (let d = 1; d <= lastDay.getDate(); d++) {
+    grid.appendChild(calCell(new Date(year, month - 1, d), false));
+  }
+  // Next month pad
+  const total = startOffset + lastDay.getDate();
+  const pad = Math.ceil(total / 7) * 7 - total;
+  for (let i = 1; i <= pad; i++) {
+    grid.appendChild(calCell(new Date(year, month, i), true));
+  }
+
+  wrap.append(h("div", { class: "card" }, grid));
+  return wrap;
+}
+function calCell(date, isOther) {
+  const dStr = date.toISOString().slice(0,10);
+  const today = new Date().toISOString().slice(0,10);
+  const txs = Store.data.transactions.filter(t => t.date === dStr);
+  const cards = Store.cards();
+  const billsToday = cards.filter(c => {
+    const inv = Store.cardInvoice(c.id);
+    return inv.due_date === dStr && inv.total !== 0;
+  });
+
+  const cell = h("div", { class: "cal-cell " + (isOther ? "other" : "") + (dStr === today ? " today" : ""),
+    onClick: () => { if (txs.length) { location.hash = `#/transactions?month=${dStr.slice(0,7)}`; } }},
+    h("div", { class: "cal-day" }, date.getDate()),
+    ...txs.slice(0, 3).map(t => h("div", {
+      class: "cal-tx " + (t.amount > 0 ? "pos" : "neg"),
+      title: t.description + " " + fmt(t.amount)
+    }, (t.amount > 0 ? "+" : "") + fmtShort(Math.abs(t.amount)) + " " + t.description.slice(0, 12))),
+    txs.length > 3 && h("div", { class: "text-xs text-muted" }, `+${txs.length - 3}`),
+    ...billsToday.map(c => h("div", { class: "cal-tx bill", title: c.name + " vence" },
+      "💳 " + c.name.slice(0, 10)))
+  );
+  return cell;
+}
+
+/* ============ REPORTS view ============ */
+function renderReports() {
+  const wrap = h("div", {});
+  wrap.append(pageHead("Relatórios", "Análises detalhadas da sua vida financeira", monthPicker()));
+
+  const months = [];
+  for (let i = 11; i >= 0; i--) months.push(addMonths(App.currentMonth, -i));
+  const summaries = months.map(m => ({ month: m, ...Store.monthSummary(m) }));
+
+  // Cards KPIs do período
+  const totalIn = summaries.reduce((s,x) => s + x.income, 0);
+  const totalOut = summaries.reduce((s,x) => s + x.expense, 0);
+  const avgIn = totalIn / 12, avgOut = totalOut / 12;
+  wrap.append(h("div", { class: "grid grid-4 mb-3" },
+    kpiCard("Receita 12m", fmt(totalIn), h("div", { class: "delta" }, `Média ${fmt(avgIn)}/mês`)),
+    kpiCard("Despesa 12m", fmt(totalOut), h("div", { class: "delta" }, `Média ${fmt(avgOut)}/mês`)),
+    kpiCard("Saldo 12m", fmt(totalIn - totalOut),
+      h("div", { class: "delta " + (totalIn > totalOut ? "pos" : "neg") },
+        `Taxa poupança ${totalIn > 0 ? (((totalIn - totalOut)/totalIn)*100).toFixed(0) : 0}%`), true),
+    kpiCard("Transações", Store.data.transactions.length,
+      h("div", { class: "delta" }, `${Store.accounts().length} contas`))
+  ));
+
+  // Gráfico evolução anual
+  wrap.append(h("div", { class: "card mb-3" },
+    h("h3", {}, "Evolução 12 meses"),
+    h("div", { style: "height:280px" }, h("canvas", { id: "chart-yearly" }))
+  ));
+
+  // Heatmap categorias mês a mês
+  wrap.append(h("div", { class: "card mb-3" },
+    h("h3", {}, "Gastos por categoria nos últimos 6 meses"),
+    h("div", { class: "table-wrap" }, renderCategoryHeatmap())
+  ));
+
+  // Comparação MoM
+  const cur = Store.monthSummary(App.currentMonth);
+  const prev = Store.monthSummary(addMonths(App.currentMonth, -1));
+  wrap.append(h("div", { class: "grid grid-2 mb-3" },
+    h("div", { class: "card" },
+      h("h3", {}, "Mês atual vs anterior"),
+      compareBar("Receita", cur.income, prev.income, "#10b981"),
+      compareBar("Despesa", cur.expense, prev.expense, "#ef4444"),
+      compareBar("Saldo", cur.net, prev.net, "#6366f1"),
+    ),
+    h("div", { class: "card" },
+      h("h3", {}, "Por dia da semana (últimos 90d)"),
+      h("div", { style: "height:200px" }, h("canvas", { id: "chart-dow" }))
+    )
+  ));
+
+  // Top pagadores (descrições mais frequentes)
+  const txs = Store.data.transactions.filter(t => t.type === "expense");
+  const byDesc = {};
+  for (const t of txs.slice(-500)) {
+    const k = (t.description || "").toLowerCase().trim();
+    (byDesc[k] = byDesc[k] || { desc: t.description, count: 0, total: 0 }).count++;
+    byDesc[k].total += Math.abs(t.amount);
+  }
+  const top = Object.values(byDesc).sort((a,b) => b.total - a.total).slice(0, 10);
+  wrap.append(h("div", { class: "card" },
+    h("h3", {}, "Top 10 maiores recebedores (onde seu dinheiro vai)"),
+    h("div", { class: "list" }, ...top.map((x, i) => h("div", { class: "list-item" },
+      h("div", { class: "avatar" }, `${i+1}`),
+      h("div", { class: "grow" },
+        h("div", { class: "title" }, x.desc),
+        h("div", { class: "sub" }, `${x.count} transações • ${fmt(x.total / x.count)} em média`)
+      ),
+      h("div", { class: "right amt neg" }, fmt(x.total))
+    )))
+  ));
+
+  setTimeout(() => { drawYearlyChart(summaries); drawDowChart(); }, 0);
+  return wrap;
+}
+
+function renderCategoryHeatmap() {
+  const months = [];
+  for (let i = 5; i >= 0; i--) months.push(addMonths(App.currentMonth, -i));
+  const cats = Store.categories().filter(c => c.type !== "income" && c.type !== "transfer");
+  const byCat = {};
+  for (const c of cats) {
+    byCat[c.id] = { cat: c, months: months.map(m =>
+      Store.listTransactions({ month: m, category_id: c.id })
+        .filter(t => t.type === "expense")
+        .reduce((s,t) => s + Math.abs(t.amount), 0)
+    )};
+  }
+  const rows = Object.values(byCat).filter(r => r.months.some(v => v > 0))
+    .sort((a,b) => b.months.reduce((s,v)=>s+v,0) - a.months.reduce((s,v)=>s+v,0));
+  const maxV = Math.max(1, ...rows.flatMap(r => r.months));
+
+  const tbl = h("table", { class: "table" },
+    h("thead", {}, h("tr", {},
+      h("th", {}, "Categoria"),
+      ...months.map(m => h("th", {}, monthLabel(m).slice(0,3))),
+      h("th", {}, "Total")
+    )),
+    h("tbody", {}, ...rows.slice(0, 15).map(r => h("tr", {},
+      h("td", {}, `${r.cat.icon} ${r.cat.name}`),
+      ...r.months.map(v => {
+        const intensity = v / maxV;
+        const bg = `rgba(239,68,68,${0.05 + intensity * 0.4})`;
+        return h("td", { style: `background:${bg}; text-align:right` },
+          v > 0 ? fmt(v) : "—");
+      }),
+      h("td", { class: "font-semi" }, fmt(r.months.reduce((s,v) => s+v, 0)))
+    )))
+  );
+  return tbl;
+}
+
+function compareBar(label, cur, prev, color) {
+  const max = Math.max(Math.abs(cur), Math.abs(prev), 1);
+  const diff = prev > 0 ? ((cur - prev) / prev * 100) : 0;
+  return h("div", { class: "mt-3" },
+    h("div", { class: "flex justify-between text-sm mb-2" },
+      h("div", {}, label),
+      h("div", {}, fmt(cur), " ", h("span", { class: `badge ${diff >= 0 ? "ok" : "danger"}`, style: "margin-left:6px" },
+        `${diff >= 0 ? "+" : ""}${diff.toFixed(0)}% vs anterior`))
+    ),
+    h("div", { class: "flex gap-2 items-center" },
+      h("div", { style: "width:70px; text-align:right; font-size:11px; color:var(--text-muted)" }, "Atual"),
+      h("div", { class: "progress", style: "flex:1" }, h("div", { style: `width:${Math.abs(cur)/max*100}%; background:${color}` })),
+      h("div", { style: "width:90px; text-align:right; font-size:11px" }, fmt(cur))
+    ),
+    h("div", { class: "flex gap-2 items-center mt-2" },
+      h("div", { style: "width:70px; text-align:right; font-size:11px; color:var(--text-muted)" }, "Anterior"),
+      h("div", { class: "progress", style: "flex:1" }, h("div", { style: `width:${Math.abs(prev)/max*100}%; background:${color}88` })),
+      h("div", { style: "width:90px; text-align:right; font-size:11px" }, fmt(prev))
+    )
+  );
+}
+
+function drawYearlyChart(summaries) {
+  const ctx = document.getElementById("chart-yearly"); if (!ctx) return;
+  const isDark = document.documentElement.classList.contains("dark");
+  const text = isDark ? "#cbd5e1" : "#475569";
+  if (App.charts.yearly) App.charts.yearly.destroy();
+  App.charts.yearly = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: summaries.map(s => monthLabel(s.month).slice(0,3)),
+      datasets: [
+        { label: "Receita", data: summaries.map(s => s.income), borderColor: "#10b981", backgroundColor: "rgba(16,185,129,.12)", fill: true, tension: .3 },
+        { label: "Despesa", data: summaries.map(s => s.expense), borderColor: "#ef4444", backgroundColor: "rgba(239,68,68,.12)", fill: true, tension: .3 },
+        { label: "Saldo", data: summaries.map(s => s.net), borderColor: "#6366f1", fill: false, tension: .3 }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: text } }},
+      scales: { y: { ticks: { color: text, callback: v => fmtShort(v) }}, x: { ticks: { color: text }}}
+    }
+  });
+}
+function drawDowChart() {
+  const ctx = document.getElementById("chart-dow"); if (!ctx) return;
+  const dows = ["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"];
+  const totals = [0,0,0,0,0,0,0];
+  const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 90);
+  for (const t of Store.data.transactions) {
+    const d = new Date(t.date);
+    if (d >= cutoff && t.amount < 0) totals[d.getDay()] += Math.abs(t.amount);
+  }
+  const isDark = document.documentElement.classList.contains("dark");
+  const text = isDark ? "#cbd5e1" : "#475569";
+  if (App.charts.dow) App.charts.dow.destroy();
+  App.charts.dow = new Chart(ctx, {
+    type: "bar",
+    data: { labels: dows, datasets: [{ data: totals, backgroundColor: "#8b5cf6" }]},
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }},
+      scales: { y: { ticks: { color: text, callback: v => fmtShort(v) }}, x: { ticks: { color: text }}}}
+  });
+}
+
+/* ============ ALLOCATION (in investments view) ============ */
+function renderAllocation() {
+  const inv = Store.investments();
+  if (!inv.length) return null;
+  const total = inv.reduce((s,i) => s + i.quantity * i.current_price, 0);
+  const byType = {};
+  for (const i of inv) {
+    const pos = i.quantity * i.current_price;
+    byType[i.type] = (byType[i.type] || 0) + pos;
+  }
+  const typeColors = { renda_fixa: "#0ea5e9", acoes: "#10b981", fii: "#f59e0b", etf: "#8b5cf6", cripto: "#ef4444" };
+  const typeLabels = { renda_fixa: "Renda fixa", acoes: "Ações", fii: "FII", etf: "ETF", cripto: "Cripto" };
+  return h("div", { class: "card mb-3" },
+    h("h3", {}, "🥧 Alocação por tipo de ativo"),
+    h("div", { class: "grid grid-2" },
+      h("div", { style: "height:220px" }, h("canvas", { id: "chart-alloc" })),
+      h("div", { class: "list" }, ...Object.entries(byType)
+        .sort(([,a],[,b]) => b - a)
+        .map(([t, v]) => h("div", { class: "list-item" },
+          h("div", { class: "avatar", style: `background:${typeColors[t]}22; color:${typeColors[t]}` }, "●"),
+          h("div", { class: "grow" },
+            h("div", { class: "title" }, typeLabels[t] || t),
+            h("div", { class: "progress mt-2" }, h("div", { style: `width:${v/total*100}%; background:${typeColors[t]}` }))
+          ),
+          h("div", { class: "right" },
+            h("div", { class: "font-semi" }, `${(v/total*100).toFixed(1)}%`),
+            h("div", { class: "text-xs text-muted" }, fmt(v))
+          )
+        )))
+    )
+  );
+}
+
+/* ============ GLOBAL SEARCH (Ctrl+K) ============ */
+function openSearch() {
+  const modal = document.getElementById("search-modal");
+  modal.classList.remove("hidden");
+  modal.className = "search-modal";
+  modal.innerHTML = "";
+  const box = h("div", { class: "search-box" },
+    h("input", { id: "srch-input", class: "search-input", placeholder: "Buscar transações, contas, categorias, páginas… (Esc para sair)", autofocus: true }),
+    h("div", { id: "srch-results", class: "search-results" })
+  );
+  modal.appendChild(box);
+  modal.onclick = (e) => { if (e.target === modal) closeSearch(); };
+  const input = box.querySelector("#srch-input");
+  input.oninput = () => updateSearch(input.value);
+  input.onkeydown = (e) => {
+    if (e.key === "Escape") closeSearch();
+    if (e.key === "Enter") {
+      const first = modal.querySelector(".search-result");
+      if (first) first.click();
+    }
+  };
+  updateSearch("");
+  setTimeout(() => input.focus(), 20);
+}
+function closeSearch() {
+  const modal = document.getElementById("search-modal");
+  modal.className = "hidden";
+  modal.innerHTML = "";
+}
+function updateSearch(q) {
+  const qn = (q || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const el = document.getElementById("srch-results");
+  el.innerHTML = "";
+
+  // Páginas
+  const pages = Object.entries(routes).filter(([_, r]) =>
+    !q || r.title.toLowerCase().includes(q.toLowerCase()));
+  if (pages.length) {
+    el.appendChild(h("div", { class: "search-section" }, "Navegar"));
+    for (const [key, r] of pages.slice(0, 5)) {
+      el.appendChild(h("div", { class: "search-result",
+        onClick: () => { closeSearch(); location.hash = `#/${key}`; }},
+        h("div", {}, r.icon, " ", r.title)
+      ));
+    }
+  }
+
+  // Transações
+  if (q) {
+    const txs = Store.listTransactions({ search: q, limit: 8 });
+    if (txs.length) {
+      el.appendChild(h("div", { class: "search-section" }, "Transações"));
+      for (const t of txs) {
+        const cat = Store.categoryById(t.category_id);
+        el.appendChild(h("div", { class: "search-result",
+          onClick: () => { closeSearch(); location.hash = `#/transactions?q=${encodeURIComponent(q)}`; }},
+          h("div", { class: "avatar", style: "width:28px; height:28px" }, cat?.icon || "📎"),
+          h("div", { class: "grow" },
+            h("div", {}, t.description),
+            h("div", { class: "text-xs text-muted" }, `${t.date} • ${cat?.name || "—"}`)
+          ),
+          h("div", { class: "font-semi " + (t.amount > 0 ? "amt pos" : "amt neg") }, fmt(t.amount))
+        ));
+      }
+    }
+    // Contas
+    const accs = Store.accounts().filter(a => a.name.toLowerCase().includes(q.toLowerCase()));
+    if (accs.length) {
+      el.appendChild(h("div", { class: "search-section" }, "Contas"));
+      for (const a of accs) {
+        el.appendChild(h("div", { class: "search-result",
+          onClick: () => { closeSearch(); location.hash = `#/transactions?account=${a.id}`; }},
+          h("div", {}, a.icon, " ", a.name, " — ", fmt(Store.accountBalance(a.id)))
+        ));
+      }
+    }
+    // Categorias
+    const cats = Store.categories().filter(c => c.name.toLowerCase().includes(q.toLowerCase()));
+    if (cats.length) {
+      el.appendChild(h("div", { class: "search-section" }, "Categorias"));
+      for (const c of cats.slice(0, 5)) {
+        el.appendChild(h("div", { class: "search-result",
+          onClick: () => { closeSearch(); location.hash = `#/transactions?category=${c.id}`; }},
+          h("div", {}, c.icon, " ", c.name, h("span", { class: "text-xs text-muted" }, " — ", c.group))
+        ));
+      }
+    }
+  }
+}
+
+/* ============ NOTIFICATIONS (bell) ============ */
+function openNotifs() {
+  closeNotifs();
+  const ins = AI.insights(Store);
+  const drawer = h("div", { class: "notif-drawer", id: "notif-drawer" },
+    h("div", { class: "flex justify-between mb-2" },
+      h("div", { class: "font-semi" }, "Notificações"),
+      h("button", { class: "btn btn-ghost btn-icon", onClick: closeNotifs }, "✕")
+    ),
+    ins.length ? h("div", { class: "list" }, ...ins.map(renderInsightItem))
+      : h("div", { class: "empty" }, "Tudo em ordem por aqui ✨")
+  );
+  document.body.appendChild(drawer);
+  setTimeout(() => { document.addEventListener("click", notifOutsideClick); }, 50);
+}
+function notifOutsideClick(e) {
+  const dr = document.getElementById("notif-drawer");
+  if (dr && !dr.contains(e.target) && !e.target.closest("#notif-btn")) closeNotifs();
+}
+function closeNotifs() {
+  document.getElementById("notif-drawer")?.remove();
+  document.removeEventListener("click", notifOutsideClick);
+}
+function updateNotifDot() {
+  const ins = Store.currentUserId ? AI.insights(Store) : [];
+  const dot = document.getElementById("notif-dot");
+  if (!dot) return;
+  const hasCritical = ins.some(i => i.severity === "danger" || i.severity === "warn");
+  dot.classList.toggle("hidden", !hasCritical);
+}
+
+/* ============ OFX IMPORT ============ */
+async function handleOfx(file) {
+  if (!file) return;
+  const text = await file.text();
+  const accs = Store.accounts();
+  if (!accs.length) return alert("Crie uma conta primeiro");
+  const pick = prompt("Em qual conta importar?\n" + accs.map((a,i) => `${i+1}. ${a.icon} ${a.name}`).join("\n"), "1");
+  const acc = accs[(+pick || 1) - 1];
+  if (!acc) return;
+
+  // Parse simples OFX
+  const txs = [];
+  const rx = /<STMTTRN>([\s\S]*?)<\/STMTTRN>/g;
+  const getTag = (block, tag) => {
+    const m = block.match(new RegExp(`<${tag}>([^<\\r\\n]*)`, "i"));
+    return m ? m[1].trim() : "";
+  };
+  let m;
+  while ((m = rx.exec(text)) !== null) {
+    const block = m[1];
+    const d = getTag(block, "DTPOSTED").slice(0, 8);
+    const date = d ? `${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}` : "";
+    const amount = +getTag(block, "TRNAMT").replace(",", ".");
+    const memo = getTag(block, "MEMO") || getTag(block, "NAME");
+    const fitid = getTag(block, "FITID");
+    if (date && amount) txs.push({ date, description: memo || "(sem descrição)", amount, external_id: fitid });
+  }
+  if (!txs.length) return alert("Não encontrei transações no OFX.");
+
+  const r = AI.reconcile(Store.data.transactions, txs);
+  for (const n of r.new) {
+    Store.addTransaction({
+      date: n.date, description: n.description, amount: n.amount,
+      account_id: acc.id, category_id: n.suggested_category,
+      type: n.amount >= 0 ? "income" : "expense"
+    });
+  }
+  alert(`✅ ${r.new.length} novas • 🔁 ${r.duplicates.length} duplicatas ignoradas`);
+  navigate();
+}
+
+/* ============ ONBOARDING ============ */
+function maybeOnboard() {
+  if (localStorage.getItem("fa_v3_onboarded")) return;
+  if (Store.data.transactions.length) { localStorage.setItem("fa_v3_onboarded", "1"); return; }
+  const steps = [
+    {
+      icon: "👋", title: `Bem-vindo, ${Store.user.name}!`,
+      body: "Vamos configurar sua gestão financeira em 4 passos rápidos. Você pode pular e fazer depois.",
+      cta: "Começar", next: 1
+    },
+    {
+      icon: "🏦", title: "Adicione sua primeira conta",
+      body: "Qual conta você mais usa? Pode ser corrente, poupança ou carteira. Informe o saldo atual.",
+      cta: "Criar conta", next: 2, action: () => openAccountModal()
+    },
+    {
+      icon: "💳", title: "Tem cartão de crédito? (opcional)",
+      body: "Cadastre seu principal cartão para acompanhar fatura, limite e vencimento.",
+      cta: "Adicionar cartão", skip: "Pular", next: 3, action: () => openCardModal()
+    },
+    {
+      icon: "🎯", title: "Defina uma meta",
+      body: "Reserva de emergência, viagem, aposentadoria… Qual é seu próximo objetivo?",
+      cta: "Criar meta", skip: "Pular", next: 4, action: () => openGoalModal()
+    },
+    {
+      icon: "🚀", title: "Pronto!",
+      body: "Seu Finance AI está configurado. Experimente a Conciliação para importar extratos e o Chat IA para perguntas.",
+      cta: "Ir para o Dashboard", next: null
+    }
+  ];
+  showOnboard(steps, 0);
+}
+function showOnboard(steps, idx) {
+  document.getElementById("onboard-bd")?.remove();
+  if (idx === null || idx >= steps.length) {
+    localStorage.setItem("fa_v3_onboarded", "1");
+    return;
+  }
+  const s = steps[idx];
+  const bd = h("div", { class: "onboard-backdrop", id: "onboard-bd" },
+    h("div", { class: "onboard-card" },
+      h("div", { class: "onboard-steps" }, ...steps.map((_, i) => h("div", { class: i <= idx ? "done" : "" }))),
+      h("div", { style: "font-size:56px; text-align:center; margin-bottom:10px" }, s.icon),
+      h("h2", { style: "text-align:center; font-size:22px" }, s.title),
+      h("p", { class: "text-muted mt-3", style: "text-align:center" }, s.body),
+      h("div", { class: "flex gap-2 mt-4", style: "justify-content:center" },
+        s.skip && h("button", { class: "btn btn-ghost", onClick: () => {
+          bd.remove();
+          showOnboard(steps, s.next);
+        }}, s.skip),
+        h("button", { class: "btn btn-gradient", onClick: () => {
+          bd.remove();
+          if (s.action) s.action();
+          setTimeout(() => showOnboard(steps, s.next), s.action ? 800 : 0);
+        }}, s.cta),
+        idx === steps.length - 1 && h("button", { class: "btn btn-ghost", onClick: () => {
+          localStorage.setItem("fa_v3_onboarded", "1");
+          bd.remove();
+          location.hash = "#/dashboard";
+        }}, "Fechar")
+      ),
+      h("div", { class: "text-xs text-muted mt-3", style: "text-align:center" },
+        h("a", { href: "#", onClick: (e) => { e.preventDefault(); localStorage.setItem("fa_v3_onboarded", "1"); bd.remove(); } }, "pular onboarding"))
+    )
+  );
+  document.body.appendChild(bd);
+}
+
+/* ============ BINDINGS GLOBAIS ============ */
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+    e.preventDefault();
+    if (document.getElementById("app").classList.contains("active")) openSearch();
+  }
+});
+
+// Mobile bar + notification button
+setTimeout(() => {
+  document.getElementById("menu-btn")?.addEventListener("click", () => {
+    document.querySelector(".sidebar")?.classList.toggle("open");
+  });
+  document.getElementById("search-btn")?.addEventListener("click", openSearch);
+  document.getElementById("notif-btn")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (document.getElementById("notif-drawer")) closeNotifs();
+    else openNotifs();
+  });
+}, 50);
+
+// Hook on navigate to update dot and run onboarding
+const _origNavigate = navigate;
+window.navigate = function() { _origNavigate(); setTimeout(updateNotifDot, 50); };
+
+// Hook enterApp
+const _origEnter = enterApp;
+window.enterApp = function() { _origEnter(); setTimeout(() => { updateNotifDot(); maybeOnboard(); }, 150); };
+
+// Hook allocation in investments
+const _origInv = renderInvestments;
+window.renderInvestments = function() {
+  const w = _origInv();
+  const alloc = renderAllocation();
+  if (alloc) {
+    w.appendChild(alloc);
+    setTimeout(() => {
+      const ctx = document.getElementById("chart-alloc");
+      if (!ctx) return;
+      const inv = Store.investments();
+      const byType = {};
+      for (const i of inv) {
+        const pos = i.quantity * i.current_price;
+        byType[i.type] = (byType[i.type] || 0) + pos;
+      }
+      const colors = { renda_fixa: "#0ea5e9", acoes: "#10b981", fii: "#f59e0b", etf: "#8b5cf6", cripto: "#ef4444" };
+      const labels = { renda_fixa: "Renda fixa", acoes: "Ações", fii: "FII", etf: "ETF", cripto: "Cripto" };
+      if (App.charts.alloc) App.charts.alloc.destroy();
+      App.charts.alloc = new Chart(ctx, {
+        type: "doughnut",
+        data: {
+          labels: Object.keys(byType).map(t => labels[t] || t),
+          datasets: [{ data: Object.values(byType), backgroundColor: Object.keys(byType).map(t => colors[t]) }]
+        },
+        options: { responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: "bottom" }}}
+      });
+    }, 0);
+  }
+  return w;
+};
+
+// Add OFX to reconcile view
+const _origReconcile = renderReconcile;
+window.renderReconcile = function() {
+  const w = _origReconcile();
+  const card = w.querySelector(".card");
+  if (card) {
+    const ofxRow = h("div", { style: "margin-top:16px; padding-top:16px; border-top:1px solid var(--border)" },
+      h("div", { class: "font-semi mb-2" }, "🏛️ Arquivo OFX (bancos brasileiros)"),
+      h("div", { class: "text-xs text-muted mb-2" }, "Padrão OFX exportado pelo internet banking"),
+      h("input", { type: "file", accept: ".ofx,.OFX", class: "input", onChange: e => handleOfx(e.target.files[0]) })
+    );
+    card.appendChild(ofxRow);
+  }
+  return w;
+};
+
+// Re-wire routes after hooks
+Object.assign(routes.investments, { render: renderInvestments });
+Object.assign(routes.reconcile, { render: renderReconcile });
 
 boot();

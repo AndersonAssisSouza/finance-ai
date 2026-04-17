@@ -6,6 +6,12 @@
 <meta name="theme-color" content="#6366f1">
 <title>Finance AI — Controle financeiro inteligente</title>
 <meta name="description" content="Sistema completo de gestão financeira pessoal com IA, conciliação bancária Pluggy, orçamentos, metas, investimentos e simulador FIRE.">
+<link rel="manifest" href="./manifest.json">
+<link rel="icon" type="image/svg+xml" href="./icon.svg">
+<link rel="apple-touch-icon" href="./icon.svg">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Finance AI">
 <link rel="stylesheet" href="./styles.css">
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
@@ -51,10 +57,46 @@
 <div id="app">
   <aside class="sidebar"></aside>
   <main class="main"></main>
+  <div id="mobile-bar" class="mobile-bar">
+    <button id="menu-btn" class="btn btn-ghost btn-icon" aria-label="Menu">☰</button>
+    <div class="flex items-center gap-2">
+      <button id="search-btn" class="btn btn-ghost btn-icon" aria-label="Buscar" title="Buscar (Ctrl+K)">🔎</button>
+      <button id="notif-btn" class="btn btn-ghost btn-icon" aria-label="Notificações" style="position:relative">
+        🔔
+        <span id="notif-dot" class="notif-dot hidden"></span>
+      </button>
+      <button id="install-btn" class="btn btn-ghost btn-icon hidden" aria-label="Instalar">⬇️</button>
+    </div>
+  </div>
 </div>
+
+<!-- Search modal -->
+<div id="search-modal" class="hidden"></div>
 
 <script src="./storage.js"></script>
 <script src="./ai_engine.js"></script>
 <script src="./app.js"></script>
+<script>
+// PWA registration
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(()=>{});
+  });
+}
+// Install prompt
+let deferredPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  document.getElementById('install-btn')?.classList.remove('hidden');
+});
+document.getElementById('install-btn')?.addEventListener('click', async () => {
+  if (!deferredPrompt) return;
+  deferredPrompt.prompt();
+  await deferredPrompt.userChoice;
+  deferredPrompt = null;
+  document.getElementById('install-btn').classList.add('hidden');
+});
+</script>
 </body>
 </html>
