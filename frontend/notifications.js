@@ -26,19 +26,110 @@ async function requestPermission() {
 }
 
 async function show(id, title, body, tag) {
-  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
   const sent = loadSent();
   if (sent[id]) return;
   sent[id] = new Date().toISOString();
   saveSent(sent);
-  try {
-    const reg = await navigator.serviceWorker?.getRegistration();
-    if (reg && reg.showNotification) {
-      reg.showNotification(title, { body, tag, icon: "./icon.svg", badge: "./icon.svg" });
-    } else {
-      new Notification(title, { body, icon: "./icon.svg" });
-    }
-  } catch { /* noop */ }
+
+  // 1. Notificação local do navegador
+  if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+    try {
+      const reg = await navigator.serviceWorker?.getRegistration();
+      if (reg && reg.showNotification) {
+        reg.showNotification(title, { body, tag, icon: "./icon.svg", badge: "./icon.svg" });
+      } else {
+        new Notification(title, { body, icon: "./icon.svg" });
+      }
+    } catch { /* noop */ }
+  }
+
+  // 2. Canais externos (Telegram, WhatsApp, Discord, etc.)
+  sendToChannels(title, body);
+}
+
+/* ============ CANAIS EXTERNOS ============ */
+async function sendToChannels(title, body) {
+  const cfg = Store.data?.settings?.channels || {};
+  const message = `*${title}*\n${body}`;
+
+  // Telegram Bot
+  if (cfg.telegram?.enabled && cfg.telegram.token && cfg.telegram.chat_id) {
+    try {
+      await fetch(`https://api.telegram.org/bot${cfg.telegram.token}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: cfg.telegram.chat_id,
+          text: message,
+          parse_mode: "Markdown"
+        })
+      });
+    } catch (e) { console.warn("Telegram:", e.message); }
+  }
+
+  // WhatsApp via CallMeBot (grátis)
+  if (cfg.whatsapp?.enabled && cfg.whatsapp.phone && cfg.whatsapp.apikey) {
+    const text = encodeURIComponent(`🔔 ${title}\n${body}`);
+    try {
+      await fetch(`https://api.callmebot.com/whatsapp.php?phone=${encodeURIComponent(cfg.whatsapp.phone)}&text=${text}&apikey=${encodeURIComponent(cfg.whatsapp.apikey)}`,
+        { mode: "no-cors" });
+    } catch (e) { console.warn("WhatsApp:", e.message); }
+  }
+
+  // ntfy.sh (push para celular via app ntfy)
+  if (cfg.ntfy?.enabled && cfg.ntfy.topic) {
+    try {
+      await fetch(`https://ntfy.sh/${cfg.ntfy.topic}`, {
+        method: "POST",
+        headers: { "Title": title, "Tags": "money,bell" },
+        body: body
+      });
+    } catch (e) { console.warn("ntfy:", e.message); }
+  }
+
+  // Discord/Slack webhook
+  if (cfg.webhook?.enabled && cfg.webhook.url) {
+    try {
+      const isDiscord = cfg.webhook.url.includes("discord.com");
+      const isSlack = cfg.webhook.url.includes("slack.com") || cfg.webhook.url.includes("hooks.slack");
+      let payload;
+      if (isDiscord) {
+        payload = { content: `**${title}**\n${body}`, username: "Finance AI" };
+      } else if (isSlack) {
+        payload = { text: `*${title}*\n${body}` };
+      } else {
+        // Genérico (IFTTT, Zapier, n8n, etc.)
+        payload = { title, body, timestamp: new Date().toISOString() };
+      }
+      await fetch(cfg.webhook.url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        mode: isDiscord || isSlack ? "cors" : "no-cors"
+      });
+    } catch (e) { console.warn("Webhook:", e.message); }
+  }
+}
+
+async function testChannel(channel) {
+  const title = "🧪 Teste Finance AI";
+  const body = `Canal ${channel} configurado com sucesso. Você receberá notificações de vencimentos, orçamentos e alertas aqui.`;
+  // Bypass do dedup: gera id único a cada teste
+  const fakeId = `test_${channel}_${Date.now()}`;
+  const sent = loadSent();
+  delete sent[fakeId];
+  saveSent(sent);
+
+  const cfg = Store.data?.settings?.channels || {};
+  const saveCfg = Store.data.settings.channels = cfg;
+
+  // força envio só do canal solicitado
+  const backup = JSON.parse(JSON.stringify(saveCfg));
+  Object.keys(saveCfg).forEach(k => { if (k !== channel && saveCfg[k]) saveCfg[k].enabled = false; });
+  await sendToChannels(title, body);
+  Store.data.settings.channels = backup;
+  Store._save();
+  return true;
 }
 
 function daysUntil(dateStr) {
@@ -128,4 +219,4 @@ function status() {
 
 function resetHistory() { localStorage.removeItem(NOTIF_KEY); }
 
-window.Notifs = { requestPermission, start, status, resetHistory, scan };
+window.Notifs = { requestPermission, start, status, resetHistory, scan, testChannel, sendToChannels };

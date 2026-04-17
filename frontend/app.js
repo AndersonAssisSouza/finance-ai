@@ -85,6 +85,26 @@ function boot() {
       renderAuth(); return;
     }
   }
+
+  // Pareamento via QR Code / link: ?join=fa://ws/...
+  const params = new URLSearchParams(location.search);
+  const joinLink = params.get("join");
+  if (joinLink && window.Cloud) {
+    setTimeout(async () => {
+      if (confirm("Entrar no workspace compartilhado?\n\nIsso substituirá seus dados locais pela versão da nuvem.")) {
+        try {
+          await Cloud.joinWorkspace(decodeURIComponent(joinLink));
+          Cloud.enableAutoSync();
+          alert("✅ Conectado ao workspace!");
+          history.replaceState(null, "", location.pathname);
+          location.reload();
+          return;
+        } catch (e) { alert("Erro ao entrar: " + e.message); }
+      }
+      history.replaceState(null, "", location.pathname);
+    }, 300);
+  }
+
   // Esconde tela de login e vai direto ao app
   $("#auth").classList.add("hidden");
   enterApp();
@@ -177,6 +197,7 @@ function renderSidebar() {
   const sb = $(".sidebar");
   sb.innerHTML = "";
   const u = Store.user;
+  const ws = window.Cloud ? Cloud.info() : null;
   sb.append(
     h("div", { class: "brand" },
       h("div", { class: "icon" }, "💎"),
@@ -184,7 +205,13 @@ function renderSidebar() {
     ),
     h("div", { class: "text-sm text-muted", style: "padding: 0 11px 12px" },
       h("div", { class: "font-semi" }, `Olá, ${u.name || u.email.split("@")[0]}`),
-      h("div", { class: "text-xs" }, u.email)
+      h("div", { class: "text-xs" }, u.email),
+      ws && h("div", { class: "text-xs mt-2" },
+        h("span", { class: "badge ok", style: "font-size:10px" },
+          "☁️ ", ws.provider === "jsonbin" ? "JSONBin" : "Gist",
+          ws.last_sync_at ? " • " + timeAgo(ws.last_sync_at) : ""
+        )
+      )
     ),
     h("div", { class: "nav-section" }, "Visão geral"),
     navItem("dashboard"),
@@ -217,6 +244,14 @@ function navItem(route) {
     h("span", { class: "ico" }, def.icon), def.title);
 }
 function logout() { Store.logout(); location.hash = ""; location.reload(); }
+
+function timeAgo(iso) {
+  const diff = (Date.now() - new Date(iso)) / 1000;
+  if (diff < 60) return "agora";
+  if (diff < 3600) return Math.floor(diff/60) + "m atrás";
+  if (diff < 86400) return Math.floor(diff/3600) + "h atrás";
+  return Math.floor(diff/86400) + "d atrás";
+}
 
 /* ============ MAIN HEADER helper ============ */
 function pageHead(title, sub, ...actions) {
@@ -1148,8 +1183,40 @@ async function openPluggyBackend() {
   const base = prompt("URL do backend Pluggy (rodando localmente):", localStorage.getItem("fa_pluggy_url") || "http://localhost:8000");
   if (!base) return;
   localStorage.setItem("fa_pluggy_url", base);
-  const itemId = prompt("Pluggy Item ID:");
+
+  // Opção 1: Connect Widget oficial do Pluggy (se disponível)
+  const useWidget = window.PluggyConnect && confirm(
+    "Abrir Pluggy Connect Widget para escolher o banco e autenticar?\n\n" +
+    "OK = abre o widget oficial do Pluggy\n" +
+    "Cancelar = usar fluxo manual (item_id direto)"
+  );
+  let itemId;
+  if (useWidget) {
+    try {
+      const tokenRes = await fetch(base + "/pluggy/connect-token", { method: "POST" });
+      if (!tokenRes.ok) throw new Error("Backend /pluggy/connect-token falhou. Configure credenciais Pluggy.");
+      const { accessToken } = await tokenRes.json();
+
+      itemId = await new Promise((resolve, reject) => {
+        const widget = new PluggyConnect({
+          connectToken: accessToken,
+          includeSandbox: true,
+          onSuccess: (itemData) => { resolve(itemData.item.id); },
+          onError: (err) => reject(err),
+          onClose: () => reject(new Error("Widget fechado"))
+        });
+        widget.init();
+      });
+    } catch (e) {
+      if (e.message === "Widget fechado") return;
+      alert("Erro no Widget: " + e.message + "\n\nTentando fluxo manual...");
+      itemId = prompt("Pluggy Item ID:");
+    }
+  } else {
+    itemId = prompt("Pluggy Item ID:");
+  }
   if (!itemId) return;
+
   try {
     const res = await fetch(base + "/pluggy/fetch", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -2212,7 +2279,7 @@ function renderFamily() {
     h("h3", {}, "🔗 Link para convidar família"),
     h("p", { class: "text-xs text-muted mb-2" },
       "Qualquer pessoa com este link verá os mesmos dados. Envie apenas para quem confia."),
-    h("div", { class: "flex gap-2" },
+    h("div", { class: "flex gap-2 mb-3" },
       h("input", { class: "input", value: link, readOnly: true, onClick: e => e.target.select() }),
       h("button", { class: "btn btn-primary", onClick: () => {
         navigator.clipboard?.writeText(link);
@@ -2222,8 +2289,28 @@ function renderFamily() {
         if (navigator.share) navigator.share({ title: "Finance AI — Workspace", text: "Entre no meu workspace de finanças:", url: link });
         else alert("Compartilhamento nativo não disponível. Copie o link.");
       }}, "📤 Compartilhar")
+    ),
+    h("div", { class: "grid grid-2 gap-3" },
+      h("div", {},
+        h("div", { class: "font-semi mb-2" }, "📱 Pareamento instantâneo por QR Code"),
+        h("div", { class: "text-xs text-muted mb-2" }, "No celular, abra a câmera e aponte para o QR. O workspace conecta automaticamente."),
+        h("canvas", { id: "ws-qrcode", style: "max-width:220px; border:1px solid var(--border); border-radius:10px; background:white; padding:8px" })
+      ),
+      h("div", {},
+        h("div", { class: "font-semi mb-2" }, "🌐 Link web direto"),
+        h("div", { class: "text-xs text-muted mb-2" }, "Este link abre o Finance AI e já conecta no workspace:"),
+        h("input", { class: "input", value: location.origin + location.pathname + "?join=" + encodeURIComponent(link), readOnly: true, onClick: e => e.target.select() })
+      )
     )
   ));
+
+  setTimeout(() => {
+    const joinUrl = location.origin + location.pathname + "?join=" + encodeURIComponent(link);
+    const canvas = document.getElementById("ws-qrcode");
+    if (canvas && window.QRCode) {
+      QRCode.toCanvas(canvas, joinUrl, { width: 220, margin: 1, color: { dark: "#0f172a", light: "#ffffff" }});
+    }
+  }, 50);
 
   wrap.append(h("div", { class: "card mb-3" },
     h("h3", {}, "⚡ Ações manuais"),
@@ -2269,35 +2356,74 @@ function renderFamily() {
 /* ============ NOTIF SECTION ============ */
 function renderNotifSection() {
   const prefs = Store.data.settings.notifications || { bills: true, budgets: true, insights: true, goals: true };
+  Store.data.settings.channels = Store.data.settings.channels || {};
+  const ch = Store.data.settings.channels;
   const status = window.Notifs ? Notifs.status() : "—";
+
   const card = h("div", { class: "card mb-3" },
     h("h3", {}, "🔔 Notificações"),
     h("div", { class: "text-sm mb-3" },
-      "Status: ", h("span", { class: `badge ${status === "Ativadas" ? "ok" : status === "Bloqueadas" ? "danger" : "warn"}` }, status)
+      "Navegador: ", h("span", { class: `badge ${status === "Ativadas" ? "ok" : status === "Bloqueadas" ? "danger" : "warn"}` }, status)
     ),
+    h("div", { class: "font-semi mb-2" }, "Tipos de alerta"),
     h("div", { class: "grid grid-2 mb-3" },
       notifToggle("bills", "Vencimento de cartões", prefs.bills),
       notifToggle("budgets", "Orçamentos 80% / 100%", prefs.budgets),
       notifToggle("insights", "Alertas críticos da IA", prefs.insights),
       notifToggle("goals", "Metas próximas ou atingidas", prefs.goals),
     ),
-    h("div", { class: "flex gap-2" },
+    h("div", { class: "flex gap-2 mb-4" },
       h("button", { class: "btn btn-primary", onClick: async () => {
         const ok = await Notifs.requestPermission();
         alert(ok ? "✅ Notificações ativadas" : "❌ Permissão negada. Ajuste no navegador.");
         navigate();
-      }}, "Pedir permissão"),
+      }}, "Pedir permissão do navegador"),
       h("button", { class: "btn btn-outline", onClick: () => {
         Notifs.resetHistory();
         Notifs.scan();
         alert("Histórico limpo + varredura executada");
-      }}, "Testar agora"),
-    )
+      }}, "Varredura manual"),
+    ),
+
+    // === Canais externos ===
+    h("div", { class: "font-semi mb-2" }, "📲 Canais externos (opcional — múltiplos simultâneos)"),
+    h("div", { class: "text-xs text-muted mb-3" },
+      "Receba alertas no celular mesmo com o navegador fechado."),
+
+    // WhatsApp
+    channelCard("whatsapp", "💬 WhatsApp (via CallMeBot, grátis)",
+      `Para ativar: 1) Salve <b>+34 644 52 65 22</b> como "CallMeBot". 2) Envie "<b>I allow callmebot to send me messages</b>" para este contato. 3) Aguarde resposta com sua APIKey. 4) Cole abaixo.`,
+      ch.whatsapp, [
+        { key: "phone", label: "Seu número (ex: +5511999999999)", placeholder: "+5511..." },
+        { key: "apikey", label: "APIKey do CallMeBot", placeholder: "123456789" }
+      ]),
+
+    // Telegram
+    channelCard("telegram", "✈️ Telegram Bot (100% grátis, oficial)",
+      `Para ativar: 1) Abra @BotFather no Telegram. 2) <code>/newbot</code> e siga os passos. 3) Copie o token. 4) Fale "/start" com seu novo bot. 5) Acesse <code>https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code> no navegador e copie o <b>chat.id</b>. 6) Preencha abaixo.`,
+      ch.telegram, [
+        { key: "token", label: "Bot Token", placeholder: "123:ABC..." },
+        { key: "chat_id", label: "Chat ID", placeholder: "123456789" }
+      ]),
+
+    // ntfy.sh
+    channelCard("ntfy", "📱 ntfy.sh (app no celular)",
+      `1) Instale o app "ntfy" (Android/iOS). 2) Crie um tópico único e difícil de adivinhar. 3) Subscreva no app. 4) Preencha abaixo.`,
+      ch.ntfy, [
+        { key: "topic", label: "Nome do tópico", placeholder: "minhas-financas-xyz123" }
+      ]),
+
+    // Discord/Slack Webhook
+    channelCard("webhook", "🔗 Discord / Slack / Webhook genérico",
+      `Cole a URL do webhook. Suporta Discord, Slack, IFTTT, Zapier, n8n.`,
+      ch.webhook, [
+        { key: "url", label: "URL do webhook", placeholder: "https://discord.com/api/webhooks/..." }
+      ])
   );
   return card;
 }
 function notifToggle(key, label, checked) {
-  return h("label", { class: "flex items-center gap-2 text-sm", style: "padding:8px; border:1px solid var(--border); border-radius:8px" },
+  return h("label", { class: "flex items-center gap-2 text-sm", style: "padding:8px; border:1px solid var(--border); border-radius:8px; cursor:pointer" },
     h("input", { type: "checkbox", checked: checked ? true : undefined, onChange: e => {
       Store.data.settings.notifications = Store.data.settings.notifications || {};
       Store.data.settings.notifications[key] = e.target.checked;
@@ -2305,6 +2431,39 @@ function notifToggle(key, label, checked) {
     }}),
     label
   );
+}
+function channelCard(key, title, help, cfg, fields) {
+  cfg = cfg || { enabled: false };
+  const body = h("div", { class: "mt-3", style: "padding:12px; border:1px solid var(--border); border-radius:10px" },
+    h("div", { class: "flex justify-between items-center mb-2" },
+      h("div", { class: "font-semi" }, title),
+      h("label", { class: "flex items-center gap-2 text-xs" },
+        h("input", { type: "checkbox", checked: cfg.enabled ? true : undefined, onChange: e => {
+          const c = Store.data.settings.channels[key] = Store.data.settings.channels[key] || {};
+          c.enabled = e.target.checked;
+          Store._save();
+        }}),
+        "Ativar"
+      )
+    ),
+    h("div", { class: "text-xs text-muted mb-3", html: help }),
+    ...fields.map(f => h("label", { class: "field", style: "margin-bottom:8px" },
+      h("span", { class: "lbl" }, f.label),
+      h("input", { class: "input", type: "text", placeholder: f.placeholder, value: cfg[f.key] || "",
+        onChange: e => {
+          const c = Store.data.settings.channels[key] = Store.data.settings.channels[key] || {};
+          c[f.key] = e.target.value.trim();
+          Store._save();
+        }})
+    )),
+    h("button", { class: "btn btn-outline text-xs", onClick: async () => {
+      try {
+        await Notifs.testChannel(key);
+        alert(`✅ Teste enviado via ${key}. Verifique o app.`);
+      } catch (e) { alert("Erro: " + e.message); }
+    }}, "🧪 Testar este canal")
+  );
+  return body;
 }
 
 /* ============ CLOUD SYNC SECTION ============ */

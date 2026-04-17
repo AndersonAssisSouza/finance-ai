@@ -206,7 +206,26 @@ def delete_transaction(
     return {"ok": True}
 
 
-# ---------------- Pluggy sync ----------------
+# ---------------- Pluggy ----------------
+@app.post("/pluggy/connect-token")
+def pluggy_connect_token():
+    """Gera Connect Token para o Pluggy Widget no frontend.
+    Sem autenticação de usuário — use apenas localmente ou com CORS restrito."""
+    import requests as rq
+    api_key = get_api_key()
+    if not api_key:
+        raise HTTPException(400, "Pluggy não configurado")
+    try:
+        r = rq.post("https://api.pluggy.ai/connect_token",
+                    headers={"X-API-KEY": api_key, "Content-Type": "application/json"},
+                    json={"options": {"clientUserId": "finance-ai-user"}},
+                    timeout=10)
+        r.raise_for_status()
+        return {"accessToken": r.json().get("accessToken")}
+    except Exception as e:
+        raise HTTPException(502, f"Falha ao gerar connect token: {e}")
+
+
 @app.post("/pluggy/fetch")
 def pluggy_fetch(data: SyncIn):
     """Busca transações do Pluggy e retorna (sem persistir).
