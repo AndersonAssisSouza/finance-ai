@@ -136,8 +136,37 @@ async function ask(Store, question) {
     }
   } catch (e) {
     console.warn("LLM:", e);
-    return `⚠️ Erro ao chamar LLM: ${e.message}\n\n---\nResposta local:\n\n${AI.chat(Store, question)}`;
+    return formatLlmError(e, cfg.provider) + "\n\n---\n" + AI.chat(Store, question);
   }
+}
+
+function formatLlmError(e, providerId) {
+  const raw = e?.message || String(e);
+  let friendly = "";
+  // Tenta extrair mensagem de dentro do JSON
+  let innerMsg = raw;
+  try {
+    const parsed = JSON.parse(raw);
+    innerMsg = parsed?.error?.message || parsed?.message || raw;
+  } catch {}
+  const lower = innerMsg.toLowerCase();
+
+  if (lower.includes("credit balance") || lower.includes("billing") || lower.includes("insufficient_quota") || lower.includes("quota")) {
+    const provName = PROVIDERS[providerId]?.name || providerId;
+    friendly = `💳 **Saldo insuficiente no ${provName}.** Adicione créditos no painel do provedor ou troque para outro em *Configurações → LLM*. ` +
+               `Sugestão: **Groq** tem camada gratuita generosa para Llama 3.`;
+  } else if (lower.includes("invalid") && (lower.includes("api") || lower.includes("key") || lower.includes("authentication"))) {
+    friendly = `🔑 **API Key inválida.** Verifique a chave em *Configurações → LLM*.`;
+  } else if (lower.includes("rate") || lower.includes("429")) {
+    friendly = `⏱️ **Rate limit atingido.** Aguarde alguns segundos e tente novamente.`;
+  } else if (lower.includes("model") && lower.includes("not") && lower.includes("found")) {
+    friendly = `🤖 **Modelo não encontrado.** Atualize o nome do modelo em *Configurações → LLM*.`;
+  } else {
+    // Mensagem curta e limpa, sem JSON cru
+    const short = innerMsg.length > 140 ? innerMsg.slice(0, 140) + "…" : innerMsg;
+    friendly = `⚠️ LLM indisponível (${short})`;
+  }
+  return friendly + "\n\nUsando resposta local por enquanto:";
 }
 
 function configure({ provider, apiKey, model, endpoint }) {
