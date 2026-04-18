@@ -1,6 +1,7 @@
 /* Finance AI — Service Worker
- * Cache-first para assets próprios; network-first para CDNs. */
-const CACHE = "finance-ai-v3.7.10";
+ * Network-first para assets próprios (garante deploys imediatos);
+ * network-first também para CDNs, com fallback offline via cache. */
+const CACHE = "finance-ai-v3.7.11";
 const LOCAL_ASSETS = [
   "./",
   "./index.html",
@@ -49,14 +50,14 @@ self.addEventListener("fetch", (e) => {
     );
     return;
   }
-  // Local → cache-first
+  // Local → network-first (garante que deploys novos cheguem)
   e.respondWith(
-    caches.match(e.request).then(cached =>
-      cached || fetch(e.request).then(res => {
+    fetch(e.request).then(res => {
+      if (res.ok) {
         const cp = res.clone();
         caches.open(CACHE).then(c => c.put(e.request, cp)).catch(() => {});
-        return res;
-      })
-    )
+      }
+      return res;
+    }).catch(() => caches.match(e.request))
   );
 });

@@ -1179,10 +1179,14 @@ function renderReconcile() {
   ));
 
   // Não-categorizadas
+  const isEmptyDesc = d => {
+    const s = (d || "").trim();
+    return !s || /^[-._\s·•–—]+$/.test(s);
+  };
   const uncat = Store.data.transactions.filter(t => t.category_id === "cat_other" || !t.category_id);
   if (uncat.length) {
     const suggestedCount = uncat.filter(t => AI.suggestCategory(t.description)).length;
-    const emptyDescCount = uncat.filter(t => !(t.description || "").trim()).length;
+    const emptyDescCount = uncat.filter(t => isEmptyDesc(t.description)).length;
     wrap.append(h("div", { class: "card mb-3" },
       h("div", { class: "flex gap-2 items-center", style: "flex-wrap:wrap; justify-content:space-between" },
         h("h3", { style: "margin:0" }, `🏷️ ${uncat.length} transações sem categoria definida`),
@@ -1192,7 +1196,7 @@ function renderReconcile() {
               if (!confirm(`Preencher ${emptyDescCount} descrições vazias com "Transação <valor>"?`)) return;
               let applied = 0;
               for (const t of uncat) {
-                if ((t.description || "").trim()) continue;
+                if (!isEmptyDesc(t.description)) continue;
                 const label = `${t.amount >= 0 ? "Recebimento" : "Pagamento"} R$ ${Math.abs(t.amount).toFixed(2)}`;
                 Store.updateTransaction(t.id, { description: label });
                 applied++;
@@ -1220,7 +1224,8 @@ function renderReconcile() {
         const suggestion = AI.suggestCategory(t.description);
         const suggestCat = suggestion ? Store.categoryById(suggestion) : null;
         const desc = (t.description || "").trim();
-        const emptyDesc = !desc;
+        // Considera descrição vazia também quando é só separadores/traços/pontos
+        const emptyDesc = !desc || /^[-._\s·•–—]+$/.test(desc);
         return h("div", { class: "list-item" },
           h("div", { class: "avatar" }, emptyDesc ? "✏️" : "❓"),
           h("div", { class: "grow" },
