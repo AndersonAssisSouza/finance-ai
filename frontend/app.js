@@ -1826,9 +1826,163 @@ function renderCalendar() {
     grid.appendChild(calCell(new Date(year, month, i), true));
   }
 
-  wrap.append(h("div", { class: "card" }, grid));
+  // Legenda de cores
+  wrap.append(h("div", { class: "card" },
+    h("div", { class: "flex gap-3 items-center text-xs", style: "flex-wrap:wrap" },
+      h("span", { class: "font-semi" }, "Legenda:"),
+      h("span", { class: "flex items-center gap-1" },
+        h("span", { style: "width:10px;height:10px;background:rgba(16,185,129,.25);border-radius:2px;display:inline-block" }),
+        " Entrada"),
+      h("span", { class: "flex items-center gap-1" },
+        h("span", { style: "width:10px;height:10px;background:rgba(239,68,68,.25);border-radius:2px;display:inline-block" }),
+        " Saída"),
+      h("span", { class: "flex items-center gap-1" },
+        h("span", { style: "width:10px;height:10px;background:rgba(245,158,11,.25);border-radius:2px;display:inline-block" }),
+        " 💳 Fatura cartão"),
+      h("span", { class: "flex items-center gap-1" },
+        h("span", { style: "width:10px;height:10px;border:1px dashed currentColor;border-radius:2px;display:inline-block" }),
+        " 🔁 Recorrência prevista"),
+      h("span", { class: "flex items-center gap-1" },
+        h("span", { style: "width:10px;height:10px;border:2px solid var(--brand);border-radius:2px;display:inline-block" }),
+        " Hoje")
+    ),
+    h("div", { style: "height:8px" }),
+    grid
+  ));
+
+  // Próximos vencimentos (30 dias)
+  wrap.append(renderUpcomingList());
+
   return wrap;
 }
+
+/** Lista "Próximos 30 dias" com vencimentos críticos destacados */
+function renderUpcomingList() {
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  const hojeStr = hoje.toISOString().slice(0,10);
+  const limiteDate = new Date(hoje); limiteDate.setDate(limiteDate.getDate() + 30);
+  const limiteStr = limiteDate.toISOString().slice(0,10);
+
+  const itens = [];
+
+  // Transações futuras já lançadas (parcelamentos)
+  for (const t of Store.data.transactions) {
+    if (t.date > hojeStr && t.date <= limiteStr && t.type !== 'transfer') {
+      itens.push({
+        data: t.date,
+        tipo: t.installment ? 'parcela' : 'lancamento',
+        desc: t.description,
+        valor: t.amount,
+        icone: t.installment ? '🔢' : (t.amount < 0 ? '💸' : '💰')
+      });
+    }
+  }
+
+  // Faturas de cartão
+  for (const c of Store.cards()) {
+    const inv = Store.cardInvoice(c.id);
+    if (inv.due_date > hojeStr && inv.due_date <= limiteStr && inv.total !== 0) {
+      itens.push({
+        data: inv.due_date,
+        tipo: 'fatura',
+        desc: `Fatura ${c.name}`,
+        valor: -Math.abs(inv.total),
+        icone: '💳',
+        critico: true
+      });
+    }
+  }
+
+  // Recorrências previstas
+  const previstas = Store.upcomingFromRecurrences(30);
+  for (const u of previstas) {
+    itens.push({
+      data: u.date,
+      tipo: 'recorrente',
+      desc: u.description,
+      valor: u.amount,
+      icone: '🔁'
+    });
+  }
+
+  itens.sort((a, b) => a.data.localeCompare(b.data));
+
+  const totalSaidas = itens.filter(i => i.valor < 0).reduce((s, i) => s + Math.abs(i.valor), 0);
+  const totalEntradas = itens.filter(i => i.valor > 0).reduce((s, i) => s + i.valor, 0);
+
+  const wrap = h("div", { class: "card mt-3" },
+    h("h3", {}, "📅 Próximos 30 dias — vencimentos e recorrências"),
+    h("div", { class: "grid grid-3 mb-3" },
+      kpiCard("Entradas previstas", fmt(totalEntradas),
+        h("div", { class: "delta pos" }, `${itens.filter(i => i.valor > 0).length} item(ns)`)),
+      kpiCard("Saídas previstas", fmt(totalSaidas),
+        h("div", { class: "delta neg" }, `${itens.filter(i => i.valor < 0).length} item(ns)`)),
+      kpiCard("Saldo previsto", fmt(totalEntradas - totalSaidas),
+        h("div", { class: "delta" }, itens.length + " vencimentos"), true)
+    )
+  );
+
+  if (!itens.length) {
+    wrap.append(h("div", { class: "empty" }, "Nenhum vencimento nos próximos 30 dias."));
+    return wrap;
+  }
+
+  // Agrupa por semana
+  const byWeek = {};
+  for (const i of itens) {
+    const d = new Date(i.data);
+    const diff = Math.floor((d - hoje) / 86400000);
+    const wk = diff <= 7 ? 'Esta semana' : diff <= 14 ? 'Próxima semana' : diff <= 21 ? 'Em 2-3 semanas' : 'Em 3-4 semanas';
+    (byWeek[wk] = byWeek[wk] || []).push(i);
+  }
+
+  for (const [semana, items] of Object.entries(byWeek)) {
+    const total = items.reduce((s, i) => s + i.valor, 0);
+    wrap.append(h("div", { class: "mt-3" },
+      h("div", { class: "flex justify-between items-center mb-2" },
+        h("div", { class: "font-semi text-sm" }, semana, " ",
+          h("span", { class: "badge" }, items.length)),
+        h("div", { class: "text-xs", style: `color:${total < 0 ? "var(--danger)" : "var(--success)"}` },
+          total >= 0 ? "+" : "", fmt(total))
+      ),
+      h("div", { class: "list" }, ...items.map(i => {
+        const valorAbs = Math.abs(i.valor);
+        const destaque = valorAbs > 1000 || i.critico;
+        return h("div", { class: "list-item", style: destaque ? "background:rgba(239,68,68,.08); border:1px solid rgba(239,68,68,.3)" : "" },
+          h("div", { class: "avatar" }, i.icone),
+          h("div", { class: "grow" },
+            h("div", { class: "title" }, i.desc,
+              destaque ? h("span", { class: "badge danger", style: "margin-left:6px; font-size:10px" }, "ATENÇÃO") : null),
+            h("div", { class: "sub" }, formatDayLabel(i.data), " • ", {
+              parcela: "Parcela",
+              lancamento: "Lançamento",
+              fatura: "Fatura cartão",
+              recorrente: "Recorrência"
+            }[i.tipo] || i.tipo)
+          ),
+          h("div", { class: `right amt ${i.valor >= 0 ? "pos" : "neg"}` },
+            (i.valor >= 0 ? "+" : "") + fmt(i.valor))
+        );
+      }))
+    ));
+  }
+
+  return wrap;
+}
+
+function formatDayLabel(dateStr) {
+  const d = new Date(dateStr);
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  const diff = Math.floor((d - hoje) / 86400000);
+  const dias = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+  const diaSem = dias[d.getDay()];
+  const dataFormat = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`;
+  if (diff === 0) return `Hoje (${diaSem} ${dataFormat})`;
+  if (diff === 1) return `Amanhã (${diaSem} ${dataFormat})`;
+  if (diff < 7) return `Em ${diff}d (${diaSem} ${dataFormat})`;
+  return `${diaSem} ${dataFormat}`;
+}
+
 function calCell(date, isOther) {
   const dStr = date.toISOString().slice(0,10);
   const today = new Date().toISOString().slice(0,10);
@@ -1843,16 +1997,30 @@ function calCell(date, isOther) {
     ? Store.upcomingFromRecurrences(120).filter(u => u.date === dStr)
     : [];
 
-  const cell = h("div", { class: "cal-cell " + (isOther ? "other" : "") + (dStr === today ? " today" : ""),
+  // Calcula total do dia
+  const total = txs.reduce((s, t) => s + t.amount, 0);
+  // Detecta se é dia crítico (fatura ou soma > R$ 1000)
+  const critico = billsToday.length > 0 || Math.abs(total) > 1000;
+
+  const cell = h("div", {
+    class: "cal-cell " + (isOther ? "other" : "") + (dStr === today ? " today" : "") + (critico && !isOther ? " critico" : ""),
+    style: critico && !isOther ? "border-color: var(--warning); background: rgba(245,158,11,.05)" : "",
     onClick: () => { if (txs.length) { location.hash = `#/transactions?month=${dStr.slice(0,7)}`; } }},
-    h("div", { class: "cal-day" }, date.getDate()),
+    h("div", { class: "flex justify-between items-center" },
+      h("div", { class: "cal-day" }, date.getDate()),
+      txs.length > 0 && h("div", { class: "text-xs", style: `font-weight:600; color:${total >= 0 ? "var(--success)" : "var(--danger)"}` },
+        total >= 0 ? "+" : "", fmtShort(Math.abs(total)))
+    ),
     ...txs.slice(0, 3).map(t => h("div", {
       class: "cal-tx " + (t.amount > 0 ? "pos" : "neg"),
       title: t.description + " " + fmt(t.amount)
     }, (t.amount > 0 ? "+" : "") + fmtShort(Math.abs(t.amount)) + " " + t.description.slice(0, 12))),
     txs.length > 3 && h("div", { class: "text-xs text-muted" }, `+${txs.length - 3}`),
-    ...billsToday.map(c => h("div", { class: "cal-tx bill", title: c.name + " vence" },
-      "💳 " + c.name.slice(0, 10))),
+    ...billsToday.map(c => h("div", {
+      class: "cal-tx bill",
+      style: "background: rgba(245,158,11,.25) !important; border: 1px solid var(--warning); font-weight: 600",
+      title: c.name + " vence hoje"
+    }, "💳 " + c.name.slice(0, 10))),
     ...upcoming.slice(0, 2).map(u => h("div", {
       class: "cal-tx " + (u.amount > 0 ? "pos" : "neg"),
       style: "opacity:.55; border:1px dashed currentColor",
