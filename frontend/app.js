@@ -1129,9 +1129,27 @@ function renderReconcile() {
   const wrap = h("div", {});
   wrap.append(pageHead("Conciliação bancária", "Importe extratos, detecte duplicatas, categorize automaticamente"));
 
+  const hasPluggyCreds = !!(localStorage.getItem("fa_pluggy_client_id") && localStorage.getItem("fa_pluggy_client_secret"));
   wrap.append(h("div", { class: "card mb-3" },
     h("h3", {}, "📥 Importar extrato"),
-    h("div", { class: "grid grid-3 gap-3 mb-3" },
+    h("div", { class: "grid grid-4 gap-3 mb-3", style: "grid-template-columns:repeat(auto-fit,minmax(200px,1fr))" },
+      h("div", { style: "border:1px solid var(--primary, #6366f1); border-radius:8px; padding:10px" },
+        h("div", { class: "font-semi" }, "⚡ Pluggy direto ",
+          h("span", { class: "text-xs", style: "background:var(--primary);color:#fff;padding:2px 6px;border-radius:4px;margin-left:4px" }, "RECOMENDADO")),
+        h("div", { class: "text-xs text-muted mb-2" }, hasPluggyCreds ? "Credenciais configuradas no browser ✓" : "Sem backend. Credenciais no localStorage."),
+        h("div", { class: "flex gap-2", style: "flex-wrap:wrap" },
+          h("button", { class: "btn btn-gradient text-xs", onClick: () => openPluggyDirect(false) }, "Conectar banco"),
+          h("button", { class: "btn btn-outline text-xs", onClick: () => openPluggyDirect(true), title: "Pluggy Bank — funciona em conta trial" }, "🧪 Sandbox"),
+          hasPluggyCreds && h("button", { class: "btn btn-ghost text-xs", title: "Limpar credenciais do browser", onClick: () => {
+            if (!confirm("Remover credenciais Pluggy deste navegador?")) return;
+            localStorage.removeItem("fa_pluggy_client_id");
+            localStorage.removeItem("fa_pluggy_client_secret");
+            localStorage.removeItem("fa_pluggy_api_key");
+            localStorage.removeItem("fa_pluggy_api_key_exp");
+            navigate();
+          }}, "🗑️")
+        )
+      ),
       h("div", {},
         h("div", { class: "font-semi" }, "CSV simples"),
         h("div", { class: "text-xs text-muted mb-2" }, "Formato: data,descrição,valor"),
@@ -1144,10 +1162,10 @@ function renderReconcile() {
       ),
       h("div", {},
         h("div", { class: "font-semi" }, "Backend Pluggy"),
-        h("div", { class: "text-xs text-muted mb-2" }, "Requer backend rodando com credenciais"),
+        h("div", { class: "text-xs text-muted mb-2" }, "Requer backend rodando (localhost)"),
         h("div", { class: "flex gap-2", style: "flex-wrap:wrap" },
-          h("button", { class: "btn btn-outline", onClick: () => openPluggyBackend(false) }, "Conectar banco"),
-          h("button", { class: "btn btn-outline text-xs", onClick: () => openPluggyBackend(true), title: "Conector de teste Pluggy Bank — funciona em contas trial" }, "🧪 Sandbox")
+          h("button", { class: "btn btn-outline text-xs", onClick: () => openPluggyBackend(false) }, "Conectar"),
+          h("button", { class: "btn btn-outline text-xs", onClick: () => openPluggyBackend(true) }, "🧪 Sandbox")
         )
       )
     ),
@@ -1157,7 +1175,7 @@ function renderReconcile() {
       h("b", {}, "⚠️ Conta Pluggy trial? "), "Só consegue conectar o conector ",
       h("b", {}, "Pluggy Bank (sandbox)"), ". Para bancos reais (Inter, Nubank, Itaú...), ",
       h("a", { href: "https://dashboard.pluggy.ai/applications", target: "_blank", class: "link" },
-        "solicite acesso a dados reais"), " no dashboard Pluggy, ou use CSV/OFX.")
+        "solicite acesso a dados reais"), " no dashboard Pluggy.")
   ));
 
   // Não-categorizadas
@@ -1247,6 +1265,134 @@ function openPluggyPaste() {
     }}
   ]);
 }
+/* ============ Pluggy DIRETO (sem backend) — credenciais no localStorage ============ */
+async function pluggyGetApiKey() {
+  // Cache de 90min (token expira em 2h)
+  const cached = localStorage.getItem("fa_pluggy_api_key");
+  const exp = +localStorage.getItem("fa_pluggy_api_key_exp") || 0;
+  if (cached && exp > Date.now()) return cached;
+
+  let clientId = localStorage.getItem("fa_pluggy_client_id");
+  let clientSecret = localStorage.getItem("fa_pluggy_client_secret");
+  if (!clientId || !clientSecret) {
+    clientId = prompt("Cole seu Pluggy Client ID:\n(obtenha em dashboard.pluggy.ai/applications)");
+    if (!clientId) throw new Error("Client ID obrigatório");
+    clientSecret = prompt("Cole seu Pluggy Client Secret:\n(fica salvo só no seu navegador)");
+    if (!clientSecret) throw new Error("Client Secret obrigatório");
+    localStorage.setItem("fa_pluggy_client_id", clientId.trim());
+    localStorage.setItem("fa_pluggy_client_secret", clientSecret.trim());
+  }
+
+  const r = await fetch("https://api.pluggy.ai/auth", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ clientId: clientId.trim(), clientSecret: clientSecret.trim() })
+  });
+  if (!r.ok) {
+    const txt = await r.text().catch(() => "");
+    // Credenciais inválidas — limpa cache
+    localStorage.removeItem("fa_pluggy_client_id");
+    localStorage.removeItem("fa_pluggy_client_secret");
+    throw new Error("Auth Pluggy falhou: " + (txt || r.status));
+  }
+  const { apiKey } = await r.json();
+  localStorage.setItem("fa_pluggy_api_key", apiKey);
+  localStorage.setItem("fa_pluggy_api_key_exp", String(Date.now() + 90 * 60 * 1000));
+  return apiKey;
+}
+async function pluggyApi(path, apiKey, opts = {}) {
+  const r = await fetch("https://api.pluggy.ai" + path, {
+    ...opts,
+    headers: { "X-API-KEY": apiKey, "Content-Type": "application/json", ...(opts.headers || {}) }
+  });
+  if (!r.ok) {
+    const txt = await r.text().catch(() => "");
+    throw new Error(`Pluggy ${path}: ${r.status} ${txt}`);
+  }
+  return r.json();
+}
+async function openPluggyDirect(sandboxOnly = false) {
+  if (!window.PluggyConnect) return alert("Widget Pluggy não carregou. Verifique sua conexão e recarregue a página.");
+  try {
+    const apiKey = await pluggyGetApiKey();
+    const ct = await pluggyApi("/connect_token", apiKey, {
+      method: "POST",
+      body: JSON.stringify({ options: { clientUserId: "finance-ai-browser" } })
+    });
+    const accessToken = ct.accessToken;
+
+    const itemId = await new Promise((resolve, reject) => {
+      const opts = {
+        connectToken: accessToken,
+        includeSandbox: true,
+        onSuccess: (d) => resolve(d.item.id),
+        onError: (err) => reject(err),
+        onClose: () => reject(new Error("Widget fechado"))
+      };
+      if (sandboxOnly) {
+        opts.connectorIds = [0, 1, 2];
+        opts.countries = ["BR"];
+      }
+      const w = new PluggyConnect(opts);
+      w.init();
+    });
+
+    // Busca contas e transações direto da API
+    const accsRes = await pluggyApi(`/accounts?itemId=${encodeURIComponent(itemId)}`, apiKey);
+    const pluggyAccs = accsRes.results || [];
+    let allTx = [];
+    for (const pa of pluggyAccs) {
+      const txRes = await pluggyApi(`/transactions?accountId=${encodeURIComponent(pa.id)}&pageSize=500`, apiKey);
+      allTx = allTx.concat(txRes.results || []);
+    }
+
+    const localAccs = Store.accounts();
+    if (!localAccs.length) return alert("Crie pelo menos uma conta local antes de sincronizar.");
+    const pick = prompt(
+      `Pluggy retornou ${allTx.length} transações em ${pluggyAccs.length} conta(s).\n\n` +
+      `Em qual conta local importar?\n` +
+      localAccs.map((a, i) => `${i+1}. ${a.icon} ${a.name}`).join("\n"),
+      "1"
+    );
+    const idx = (+pick || 1) - 1;
+    const acc = localAccs[idx];
+    if (!acc) return;
+
+    const incoming = allTx.map(t => ({
+      date: (t.date || "").slice(0, 10),
+      description: t.description || t.descriptionRaw || "",
+      amount: +t.amount,
+      external_id: t.id
+    }));
+    const r = AI.reconcile(Store.data.transactions, incoming);
+    for (const n of r.new) {
+      Store.addTransaction({
+        date: n.date, description: n.description, amount: n.amount,
+        account_id: acc.id, category_id: n.suggested_category,
+        type: n.amount >= 0 ? "income" : "expense"
+      });
+    }
+    localStorage.setItem("fa_pluggy_last_item", itemId);
+    alert(`✅ Importado: ${r.new.length} nova(s)\n🔁 Ignoradas (duplicatas): ${r.duplicates.length}`);
+    navigate();
+  } catch (e) {
+    if (e?.message === "Widget fechado") return;
+    const errStr = String(e?.code || e?.message || e);
+    if (errStr.includes("TRIAL_CLIENT_ITEM_CREATE_NOT_ALLOWED")) {
+      const retry = confirm(
+        "⚠️ Sua conta Pluggy está em modo TRIAL.\n\n" +
+        "Contas trial só podem conectar o conector SANDBOX (Pluggy Bank).\n" +
+        "Para bancos reais (Inter, Nubank, Itaú...), solicite acesso em:\n" +
+        "dashboard.pluggy.ai/applications\n\n" +
+        "Deseja testar agora com Pluggy Bank (sandbox)?"
+      );
+      if (retry) return openPluggyDirect(true);
+      return;
+    }
+    alert("Erro Pluggy: " + errStr);
+  }
+}
+
 async function openPluggyBackend(sandboxOnly = false) {
   const base = prompt("URL do backend Pluggy (rodando localmente):", localStorage.getItem("fa_pluggy_url") || "http://localhost:8000");
   if (!base) return;
