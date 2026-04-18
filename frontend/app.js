@@ -1145,18 +1145,40 @@ function renderReconcile() {
       h("div", {},
         h("div", { class: "font-semi" }, "Backend Pluggy"),
         h("div", { class: "text-xs text-muted mb-2" }, "Requer backend rodando com credenciais"),
-        h("button", { class: "btn btn-outline", onClick: () => openPluggyBackend() }, "Sincronizar")
+        h("div", { class: "flex gap-2", style: "flex-wrap:wrap" },
+          h("button", { class: "btn btn-outline", onClick: () => openPluggyBackend(false) }, "Conectar banco"),
+          h("button", { class: "btn btn-outline text-xs", onClick: () => openPluggyBackend(true), title: "Conector de teste Pluggy Bank — funciona em contas trial" }, "🧪 Sandbox")
+        )
       )
     ),
     h("div", { class: "text-xs text-muted" },
-      "A conciliação detecta duplicatas (mesma descrição + valor em até 2 dias) e sugere categoria para transações novas.")
+      "A conciliação detecta duplicatas (mesma descrição + valor em até 2 dias) e sugere categoria para transações novas."),
+    h("div", { class: "text-xs text-muted mt-2", style: "border-left:3px solid var(--warn, #f59e0b); padding-left:8px" },
+      h("b", {}, "⚠️ Conta Pluggy trial? "), "Só consegue conectar o conector ",
+      h("b", {}, "Pluggy Bank (sandbox)"), ". Para bancos reais (Inter, Nubank, Itaú...), ",
+      h("a", { href: "https://dashboard.pluggy.ai/applications", target: "_blank", class: "link" },
+        "solicite acesso a dados reais"), " no dashboard Pluggy, ou use CSV/OFX.")
   ));
 
   // Não-categorizadas
   const uncat = Store.data.transactions.filter(t => t.category_id === "cat_other" || !t.category_id);
   if (uncat.length) {
+    const suggestedCount = uncat.filter(t => AI.suggestCategory(t.description)).length;
     wrap.append(h("div", { class: "card mb-3" },
-      h("h3", {}, `🏷️ ${uncat.length} transações sem categoria definida`),
+      h("div", { class: "flex gap-2 items-center", style: "flex-wrap:wrap; justify-content:space-between" },
+        h("h3", { style: "margin:0" }, `🏷️ ${uncat.length} transações sem categoria definida`),
+        suggestedCount > 0 && h("button", { class: "btn btn-gradient text-xs", onClick: () => {
+          if (!confirm(`Aplicar categorização automática da IA em ${suggestedCount} transações?`)) return;
+          let applied = 0;
+          for (const t of uncat) {
+            const sug = AI.suggestCategory(t.description);
+            if (sug) { Store.updateTransaction(t.id, { category_id: sug }); applied++; }
+          }
+          alert(`✅ ${applied} transações categorizadas automaticamente`);
+          navigate();
+        }}, `🤖 Categorizar ${suggestedCount} com IA`)
+      ),
+      h("div", { class: "text-xs text-muted mt-2 mb-2" }, "Mostrando as 50 primeiras. Use o botão acima para aplicar a categorização em massa."),
       h("div", { class: "list scroll-y", style: "max-height:400px" }, ...uncat.slice(0, 50).map(t => {
         const suggestion = AI.suggestCategory(t.description);
         const suggestCat = suggestion ? Store.categoryById(suggestion) : null;
@@ -1225,13 +1247,14 @@ function openPluggyPaste() {
     }}
   ]);
 }
-async function openPluggyBackend() {
+async function openPluggyBackend(sandboxOnly = false) {
   const base = prompt("URL do backend Pluggy (rodando localmente):", localStorage.getItem("fa_pluggy_url") || "http://localhost:8000");
   if (!base) return;
   localStorage.setItem("fa_pluggy_url", base);
 
   // Opção 1: Connect Widget oficial do Pluggy (se disponível)
   const useWidget = window.PluggyConnect && confirm(
+    (sandboxOnly ? "🧪 MODO SANDBOX — só conectores de teste (Pluggy Bank).\n\n" : "") +
     "Abrir Pluggy Connect Widget para escolher o banco e autenticar?\n\n" +
     "OK = abre o widget oficial do Pluggy\n" +
     "Cancelar = usar fluxo manual (item_id direto)"
@@ -1244,18 +1267,38 @@ async function openPluggyBackend() {
       const { accessToken } = await tokenRes.json();
 
       itemId = await new Promise((resolve, reject) => {
-        const widget = new PluggyConnect({
+        const widgetOpts = {
           connectToken: accessToken,
           includeSandbox: true,
           onSuccess: (itemData) => { resolve(itemData.item.id); },
           onError: (err) => reject(err),
           onClose: () => reject(new Error("Widget fechado"))
-        });
+        };
+        // Em modo sandbox, força apenas o conector Pluggy Bank (id 0 e 1 são sandbox)
+        if (sandboxOnly) {
+          widgetOpts.connectorIds = [0, 1, 2];
+          widgetOpts.countries = ["BR"];
+        }
+        const widget = new PluggyConnect(widgetOpts);
         widget.init();
       });
     } catch (e) {
       if (e.message === "Widget fechado") return;
-      alert("Erro no Widget: " + e.message + "\n\nTentando fluxo manual...");
+      // Trata erro específico de conta trial tentando conectar banco real
+      const errCode = e?.code || e?.message || "";
+      const errStr = String(errCode);
+      if (errStr.includes("TRIAL_CLIENT_ITEM_CREATE_NOT_ALLOWED")) {
+        const retry = confirm(
+          "⚠️ Sua conta Pluggy está em modo TRIAL.\n\n" +
+          "Contas trial só podem conectar o conector SANDBOX (Pluggy Bank).\n" +
+          "Para bancos reais (Inter, Nubank, Itaú...), solicite acesso a dados reais em:\n" +
+          "dashboard.pluggy.ai/applications\n\n" +
+          "Deseja tentar agora com Pluggy Bank (sandbox)?"
+        );
+        if (retry) return openPluggyBackend(true);
+        return;
+      }
+      alert("Erro no Widget: " + errStr + "\n\nTentando fluxo manual...");
       itemId = prompt("Pluggy Item ID:");
     }
   } else {
