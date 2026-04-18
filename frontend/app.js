@@ -1182,29 +1182,61 @@ function renderReconcile() {
   const uncat = Store.data.transactions.filter(t => t.category_id === "cat_other" || !t.category_id);
   if (uncat.length) {
     const suggestedCount = uncat.filter(t => AI.suggestCategory(t.description)).length;
+    const emptyDescCount = uncat.filter(t => !(t.description || "").trim()).length;
     wrap.append(h("div", { class: "card mb-3" },
       h("div", { class: "flex gap-2 items-center", style: "flex-wrap:wrap; justify-content:space-between" },
         h("h3", { style: "margin:0" }, `🏷️ ${uncat.length} transações sem categoria definida`),
-        suggestedCount > 0 && h("button", { class: "btn btn-gradient text-xs", onClick: () => {
-          if (!confirm(`Aplicar categorização automática da IA em ${suggestedCount} transações?`)) return;
-          let applied = 0;
-          for (const t of uncat) {
-            const sug = AI.suggestCategory(t.description);
-            if (sug) { Store.updateTransaction(t.id, { category_id: sug }); applied++; }
-          }
-          alert(`✅ ${applied} transações categorizadas automaticamente`);
-          navigate();
-        }}, `🤖 Categorizar ${suggestedCount} com IA`)
+        h("div", { class: "flex gap-2", style: "flex-wrap:wrap" },
+          emptyDescCount > 0 && h("button", { class: "btn btn-outline text-xs", title: "Preenche descrições vazias com tipo e valor",
+            onClick: () => {
+              if (!confirm(`Preencher ${emptyDescCount} descrições vazias com "Transação <valor>"?`)) return;
+              let applied = 0;
+              for (const t of uncat) {
+                if ((t.description || "").trim()) continue;
+                const label = `${t.amount >= 0 ? "Recebimento" : "Pagamento"} R$ ${Math.abs(t.amount).toFixed(2)}`;
+                Store.updateTransaction(t.id, { description: label });
+                applied++;
+              }
+              alert(`✏️ ${applied} descrições preenchidas`);
+              navigate();
+            }
+          }, `✏️ Preencher ${emptyDescCount} vazias`),
+          suggestedCount > 0 && h("button", { class: "btn btn-gradient text-xs", onClick: () => {
+            if (!confirm(`Aplicar categorização automática da IA em ${suggestedCount} transações?`)) return;
+            let applied = 0;
+            for (const t of uncat) {
+              const sug = AI.suggestCategory(t.description);
+              if (sug) { Store.updateTransaction(t.id, { category_id: sug }); applied++; }
+            }
+            alert(`✅ ${applied} transações categorizadas automaticamente`);
+            navigate();
+          }}, `🤖 Categorizar ${suggestedCount} com IA`)
+        )
       ),
+      emptyDescCount > 0 && h("div", { class: "text-xs", style: "color:var(--warn,#f59e0b); margin-top:6px" },
+        `⚠️ ${emptyDescCount} transações sem descrição — clique no campo tracejado para preencher manualmente, ou use o botão ✏️ acima para preencher todas de uma vez.`),
       h("div", { class: "text-xs text-muted mt-2 mb-2" }, "Mostrando as 50 primeiras. Use o botão acima para aplicar a categorização em massa."),
       h("div", { class: "list scroll-y", style: "max-height:400px" }, ...uncat.slice(0, 50).map(t => {
         const suggestion = AI.suggestCategory(t.description);
         const suggestCat = suggestion ? Store.categoryById(suggestion) : null;
+        const desc = (t.description || "").trim();
+        const emptyDesc = !desc;
         return h("div", { class: "list-item" },
-          h("div", { class: "avatar" }, "❓"),
+          h("div", { class: "avatar" }, emptyDesc ? "✏️" : "❓"),
           h("div", { class: "grow" },
-            h("div", { class: "title" }, t.description),
-            h("div", { class: "sub" }, `${t.date} • ${fmt(t.amount)}`)
+            emptyDesc
+              ? h("input", {
+                  class: "input",
+                  style: "padding:4px 8px; font-size:13px; background:transparent; border:1px dashed var(--border,#666)",
+                  placeholder: "Sem descrição — clique e digite",
+                  onBlur: (e) => {
+                    const v = e.target.value.trim();
+                    if (v) { Store.updateTransaction(t.id, { description: v }); navigate(); }
+                  },
+                  onKeyDown: (e) => { if (e.key === "Enter") e.target.blur(); }
+                })
+              : h("div", { class: "title" }, desc),
+            h("div", { class: "sub" }, `${t.date} • ${fmt(t.amount)}${t.type ? " • " + t.type : ""}`)
           ),
           suggestCat && h("button", { class: "btn btn-outline text-xs",
             onClick: () => { Store.updateTransaction(t.id, { category_id: suggestCat.id }); navigate(); }
