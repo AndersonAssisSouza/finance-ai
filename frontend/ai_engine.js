@@ -333,9 +333,9 @@ function suggestCategory(description) {
   const d = normalize(clean);
   const rules = [
     // Delivery / Food apps
-    { r: /ifood|rappi|uber\s*eats|jim\.com|99food/, c: "cat_delivery" },
-    // Streaming
-    { r: /netflix|spotify|disney|hbo|prime video|globoplay|deezer|apple music|youtube premium/, c: "cat_streaming" },
+    { r: /ifood|rappi|uber\s*eats|jim\.com|99food|^ifd\s*\*|ifd\*/, c: "cat_delivery" },
+    // Streaming / SaaS
+    { r: /netflix|spotify|disney|hbo|prime video|globoplay|deezer|apple music|youtube premium|openai|chatgpt|claude\.ai|anthropic|midjourney|copilot|cursor\.com|notion\.so|figma\.com|canva/, c: "cat_streaming" },
     // Transporte por app
     { r: /^uber(?!\s*eats)|99app|99 app|\bpop\s?99|cabify|indriver/, c: "cat_rideshare" },
     // Combustível
@@ -343,9 +343,9 @@ function suggestCategory(description) {
     // Estacionamento / transporte
     { r: /allpark|estapar|zona azul|estacion|bus servi|onibus|metro|cptm|bilhete|rodoviari/, c: "cat_transit" },
     // Supermercado
-    { r: /mercado|supermerc|carrefour|atacad|dma |pao de ac|extra |assai|bh supermer|bretas|epa |verdemar|hortifrut|alimentar carnes|carnes nobre|ki gas|comercial irmaos|distribuidora/, c: "cat_grocery" },
+    { r: /mercado|supermerc|carrefour|atacad|dma |pao de ac|extra |assai|bh supermer|bretas|epa\b|verdemar|hortifrut|alimentar carnes|carnes nobre|ki gas|comercial irmaos|distribuidora|super varejao|varejao|emporio casa branca|feira no epa|feira livre|organizacoes junqueira|sacolao|quitanda/, c: "cat_grocery" },
     // Restaurante / comida
-    { r: /restaur|hambur|lanchon|pizza|padar|cafeteri|bar |churrasc|boteco|pipoca |acai|acaí|blend cacau|ailton|nio fibra|cotaoffice|alvinopolis|ducarmos|du carmos/, c: "cat_restaurant" },
+    { r: /restaur|hambur|lanchon|pizza|padar|cafeteri|bar |churrasc|boteco|pipoca |acai|acaí|blend cacau|ailton|nio fibra|cotaoffice|alvinopolis|ducarmos|du carmos|sorvete|sorveteria|popolare|hibisco|villa do principe|sucos e vitaminas|locomotivafoodtru|food tru|trattoria|tratoria|emporium|emporio oriente|villa do principe|loja oficial 2|ponto certo|jim com|tia sonia|tia sônia|ceveja|cerveja|empreendimentos vip|hibisco porto seguro|sub congonhas/, c: "cat_restaurant" },
     // Bebidas
     { r: /bebida|cerveja|adega|choper|chopp|vinho/, c: "cat_restaurant" },
     // Farmácia / Saúde
@@ -363,20 +363,26 @@ function suggestCategory(description) {
     // Internet/TV
     { r: /vivo |claro |tim |oi fibra|nio fibra|net |algar|sky |brisanet|desktop |americane?t/, c: "cat_internet" },
     // Utilities (luz, água, gás)
-    { r: /cemig|enel|copel|cpfl|light|eletropaulo|coelba|celpe|energisa|copasa|sabesp|caesb|compesa|comgas|gas natural|sispass/, c: "cat_utilities" },
+    { r: /cemig|enel|copel|cpfl|light|eletropaulo|coelba|celpe|energisa|copasa|sabesp|caesb|compesa|comgas|gas natural|sispass|gasmig|vicosa gas|gas nacional/, c: "cat_utilities" },
     // Transferências
     { r: /^pix(?!\s*car)|^ted|^doc |^transf|pagamento de boleto/, c: "cat_transfer" },
     // Viagem
     { r: /latam|gol |azul |tam |decolar|booking|airbnb|hotel|hospedagem|aerop|cnf aeroporto|passagem/, c: "cat_travel" },
     // Vestuário
-    { r: /havaianas|crocs|rena?r\b|c&a|riachuelo|hering|zara |pernambucanas|calcad|sapatar|tenis|verao empreendimento/, c: "cat_clothing" },
-    // Compras / Eletrônicos
-    { r: /apple|iplace|dell|samsung|xiaomi|magazineluiza|magalu|shopee|amazon|mercado livre|mercadolivre|kabum/, c: "cat_shopping" },
+    { r: /havaianas|crocs|rena?r\b|c&a|riachuelo|hering|zara |pernambucanas|calcad|sapatar|tenis|verao empreendimento|olympikus|nike |adidas|puma|netshoes/, c: "cat_clothing" },
+    // Compras / Eletrônicos / Casa
+    { r: /apple|iplace|dell|samsung|xiaomi|magazineluiza|magalu|shopee|amazon|mercado livre|mercadolivre|kabum|leroy merlin|tok\s?stok|tokstok|etna|mobly|mp \*|victorvariedades|mtdiversoes|conserto celular|capinha|controle video game|video game|mochila|pada /, c: "cat_shopping" },
     // Lazer / Entretenimento
-    { r: /cinema|ingresso|sympla|show|teatro|parque|clube giro|clube |carnaval/, c: "cat_entertainment" },
+    { r: /cinema|ingresso|sympla|show|teatro|parque|clube giro|clube |carnaval|atletico mineiro|galo|cruzeiro|flamengo|palmeiras|sao paulo fc|corinthians|vasco|botafogo|socio torcedor|ingress/, c: "cat_entertainment" },
     // Serviços específicos do usuário
     { r: /adesivos|anuncio|meudinheiro|manuten[çc][aã]o|jeep|compass|fralda|otica|oculos|óculos/, c: "cat_shopping" },
     { r: /atila reinaldo|comercial irmaos las casas/, c: "cat_grocery" },
+    // Taxas / juros / IOF / débito rotativo
+    { r: /^iof\b|^tarifa|^anuidade|juros |multa |debito rotativo|rotativo digital|encargos|tac /, c: "cat_other" },
+    // Câmbio / remessa internacional
+    { r: /^wise\b|^wize\b|remessa online|paypal|nomad|c6 global|western union|santander cambio/, c: "cat_other" },
+    // Descrições genéricas que viram "outros"
+    { r: /^outras?\s+despesas?\s*$|^diversos\s*$|^geral\s*$/, c: "cat_other" },
   ];
   for (const { r, c } of rules) if (r.test(d)) return c;
   return null;
