@@ -377,14 +377,44 @@ function suggestCategory(description) {
     // Serviços específicos do usuário
     { r: /adesivos|anuncio|meudinheiro|manuten[çc][aã]o|jeep|compass|fralda|otica|oculos|óculos/, c: "cat_shopping" },
     { r: /atila reinaldo|comercial irmaos las casas/, c: "cat_grocery" },
-    // Taxas / juros / IOF / débito rotativo
-    { r: /^iof\b|^tarifa|^anuidade|juros |multa |debito rotativo|rotativo digital|encargos|tac /, c: "cat_other" },
+    // Escola / Mensalidade (categoria cat_school)
+    { r: /mensalidade|colegio|col[eé]gio|escola\b|creche|kumon|maple bear|objetivo|seb |pueri|sesi |abapedia|wizard|ccaa|yazigi|cultura inglesa|fisk|pueri domus/, c: "cat_school" },
+    // Educação geral (livros, cursos, material) — separado de mensalidade
+    { r: /livraria|curso |udemy|alura|coursera|rocketseat|^fgv\b|sebrae|material escolar|papelaria/, c: "cat_education" },
+    // Exames médicos / laboratório
+    { r: /laborat[oó]ri|sabin|hermes pardini|fleury|dasa |cdb |tomograf|ressonanc|ultrasson|ultrassom|raio ?x|hemograma|checkup|check-up|exame /, c: "cat_exams" },
+    // Cuidados pessoais (cabelo, estética)
+    { r: /cabelo|barbear|barbeiro|salao de beleza|sal[aã]o |manicure|pedicure|estetic|spa |massag|depila|escova|progressiva|sobrancelha/, c: "cat_personal" },
+    // Pagamento de cartão de crédito
+    { r: /pagamento (de )?fatura|pagamento cart[aã]o|fatura cart[aã]o|pg cart|^fatura \b|^fatura\s+cartao/, c: "cat_card_payment" },
+    // Impostos (DARF, IPVA, IPTU, ICMS, ISS, ITR, ITCMD, ITBI, receita federal, etc.)
+    { r: /\bdarf\b|\bipva\b|\biptu\b|\bitr\b|\bitcmd\b|\bitbi\b|\biss\b|\bicms\b|\bipi\b|\bcofins\b|\bpis\b|\bcsll\b|\birrf\b|receita federal|sec\.?\s*(da\s*)?fazenda|secretaria (da )?fazenda|sefaz|detran.*licenciamento|imposto\b|^irpf\b|^irpj\b|contribui[çc][aã]o sindical|das mei|das simples|carn[eê] le[aã]o|carnet le[aã]o|guia (de )?recolhimento|gare |gnre |licenciamento veicular|taxa (de )?licenciamento|dpvat/, c: "cat_taxes" },
+    // Previdência social (INSS)
+    { r: /\binss\b|guia previdenc|gps /, c: "cat_pension" },
+    // Previdência privada
+    { r: /pgbl|vgbl|previdencia privada|brasilprev|icatu|bradesco prev|itau prev|zurich prev/, c: "cat_pension_private" },
+    // Pró-labore (receita — distinto de salário)
+    { r: /pro.?labore|prolabore|retirada s[oó]cio|distribui[çc][aã]o de lucros/, c: "cat_prolabore" },
+    // Investimentos (saída para aporte)
+    { r: /tesouro direto|aporte |compra (de )?(acoes|ações|fii|etf)|b3 investimento|xp investiment|nuinvest|inter invest|clear corr|rico invest/, c: "cat_invest_out" },
+    // Juros / cheque especial / encargos financeiros
+    { r: /cheque especial|juros cheque|juros rotativo|encargo financeiro|mora /, c: "cat_interest" },
+    // Subscription (apps pagos que não são streaming de mídia)
+    { r: /notion subscription|figma subscription|1password|dropbox subscript|icloud|google (one|workspace)|microsoft (365|office)/, c: "cat_subscription" },
+    // Taxas / tarifas / IOF / débito rotativo (sobra — vai para Juros não Outros)
+    { r: /^iof\b|^tarifa|^anuidade|debito rotativo|rotativo digital|^tac\s/, c: "cat_interest" },
     // Câmbio / remessa internacional
     { r: /^wise\b|^wize\b|remessa online|paypal|nomad|c6 global|western union|santander cambio/, c: "cat_other" },
     // Descrições genéricas que viram "outros"
     { r: /^outras?\s+despesas?\s*$|^diversos\s*$|^geral\s*$/, c: "cat_other" },
   ];
-  for (const { r, c } of rules) if (r.test(d)) return c;
+  for (const { r, c } of rules) {
+    if (r.test(d)) {
+      // Defensivo: só retorna se a categoria existir no Store do usuário
+      if (typeof Store !== "undefined" && Store.categoryById && !Store.categoryById(c)) continue;
+      return c;
+    }
+  }
   return null;
 }
 
