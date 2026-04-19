@@ -1191,6 +1191,10 @@ function renderReconcile() {
       h("div", { class: "flex gap-2 items-center", style: "flex-wrap:wrap; justify-content:space-between" },
         h("h3", { style: "margin:0" }, `🏷️ ${uncat.length} transações sem categoria definida`),
         h("div", { class: "flex gap-2", style: "flex-wrap:wrap" },
+          h("button", { class: "btn btn-gradient text-xs", style: "background:linear-gradient(135deg,#8b5cf6,#6366f1)",
+            title: "Pipeline completo: categoriza com IA + detecta duplicatas + marca ajustes de saldo",
+            onClick: () => runSanitizePipeline(uncat)
+          }, "🧹 Sanear tudo"),
           emptyDescCount > 0 && h("button", { class: "btn btn-outline text-xs", title: "Preenche descrições vazias com tipo e valor",
             onClick: () => {
               if (!confirm(`Preencher ${emptyDescCount} descrições vazias com "Transação <valor>"?`)) return;
@@ -1266,6 +1270,65 @@ function renderReconcile() {
 
   return wrap;
 }
+
+/* Pipeline de saneamento: categoriza com IA + detecta duplicatas + identifica ajustes */
+function runSanitizePipeline(uncatInitial) {
+  const isEmptyDesc = d => { const s = (d || "").trim(); return !s || /^[-._\s·•–—]+$/.test(s); };
+
+  // ETAPA 1: categorização automática (usa AI.suggestCategory expandido)
+  let categorized = 0;
+  for (const t of uncatInitial) {
+    const sug = AI.suggestCategory(t.description);
+    if (sug) { Store.updateTransaction(t.id, { category_id: sug }); categorized++; }
+  }
+
+  // ETAPA 2: detectar duplicatas em TODAS as transações (mesmo desc+amount+date+conta)
+  const seen = new Map();
+  const dupIds = [];
+  for (const t of Store.data.transactions) {
+    const k = `${t.date}|${(t.description||"").trim().toLowerCase()}|${t.amount}|${t.account_id||""}`;
+    if (seen.has(k)) dupIds.push(t.id);
+    else seen.set(k, t.id);
+  }
+
+  // ETAPA 3: identificar "Ajuste de Saldo" e similares (transações de reconciliação manual)
+  const ajusteIds = Store.data.transactions.filter(t =>
+    /^ajuste\s*(de)?\s*saldo\s*$/i.test((t.description||"").trim())
+  ).map(t => t.id);
+
+  // ETAPA 4: restantes ainda sem categoria (depois da etapa 1)
+  const stillUncat = Store.data.transactions.filter(t =>
+    (t.category_id === "cat_other" || !t.category_id) && !dupIds.includes(t.id) && !ajusteIds.includes(t.id)
+  );
+
+  // Relatório antes de qualquer exclusão
+  const parts = [
+    `📊 Relatório de saneamento\n`,
+    `✅ Categorizadas pela IA: ${categorized}`,
+    `🔁 Duplicatas detectadas: ${dupIds.length}`,
+    `⚖️ "Ajuste de Saldo" encontrados: ${ajusteIds.length}`,
+    `❓ Ainda sem categoria (manual): ${stillUncat.length}`,
+    ``,
+    `Deseja EXCLUIR as ${dupIds.length} duplicatas + ${ajusteIds.length} ajustes de saldo?`,
+    `(As demais são mantidas para você revisar manualmente)`
+  ];
+  const deleteCount = dupIds.length + ajusteIds.length;
+
+  if (deleteCount > 0 && confirm(parts.join("\n"))) {
+    if (confirm(`⚠️ Confirma exclusão definitiva de ${deleteCount} transações?\nEssa ação é irreversível.`)) {
+      const toDelete = new Set([...dupIds, ...ajusteIds]);
+      Store.data.transactions = Store.data.transactions.filter(t => !toDelete.has(t.id));
+      Store._save();
+      alert(`🧹 Saneamento concluído!\n\n✅ ${categorized} categorizadas\n🗑️ ${toDelete.size} excluídas\n❓ ${stillUncat.length} para revisar manualmente`);
+    } else {
+      alert(`🧹 Categorização aplicada.\n\n✅ ${categorized} categorizadas\n❓ ${stillUncat.length + dupIds.length + ajusteIds.length} para revisar manualmente`);
+    }
+  } else {
+    alert(`🧹 Categorização aplicada.\n\n✅ ${categorized} categorizadas\n❓ ${stillUncat.length + dupIds.length + ajusteIds.length} para revisar manualmente`);
+  }
+  navigate();
+}
+
 async function handleCsv(file) {
   if (!file) return;
   const text = await file.text();
