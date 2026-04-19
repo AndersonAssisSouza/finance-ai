@@ -1183,23 +1183,29 @@ function renderReconcile() {
     const s = (d || "").trim();
     return !s || /^[-._\s·•–—]+$/.test(s);
   };
-  const uncat = Store.data.transactions.filter(t => t.category_id === "cat_other" || !t.category_id);
-  if (uncat.length) {
-    const suggestedCount = uncat.filter(t => AI.suggestCategory(t.description)).length;
-    const emptyDescCount = uncat.filter(t => isEmptyDesc(t.description)).length;
+  const uncat = Store.data.transactions.filter(t => !t.category_id);
+  const explicitOther = Store.data.transactions.filter(t => t.category_id === "cat_other");
+  const viewList = uncat.length ? uncat : explicitOther;
+  if (uncat.length || explicitOther.length) {
+    const suggestedCount = viewList.filter(t => AI.suggestCategory(t.description)).length;
+    const emptyDescCount = viewList.filter(t => isEmptyDesc(t.description)).length;
     wrap.append(h("div", { class: "card mb-3" },
       h("div", { class: "flex gap-2 items-center", style: "flex-wrap:wrap; justify-content:space-between" },
-        h("h3", { style: "margin:0" }, `🏷️ ${uncat.length} transações sem categoria definida`),
+        h("h3", { style: "margin:0" },
+          uncat.length
+            ? `🏷️ ${uncat.length} transações sem categoria definida`
+            : `📎 ${explicitOther.length} transações marcadas como "Outros"`
+        ),
         h("div", { class: "flex gap-2", style: "flex-wrap:wrap" },
           h("button", { class: "btn btn-gradient text-xs", style: "background:linear-gradient(135deg,#8b5cf6,#6366f1)",
             title: "Pipeline completo: categoriza com IA + detecta duplicatas + marca ajustes de saldo",
-            onClick: () => runSanitizePipeline(uncat)
+            onClick: () => runSanitizePipeline(viewList)
           }, "🧹 Sanear tudo"),
           emptyDescCount > 0 && h("button", { class: "btn btn-outline text-xs", title: "Preenche descrições vazias com tipo e valor",
             onClick: () => {
               if (!confirm(`Preencher ${emptyDescCount} descrições vazias com "Transação <valor>"?`)) return;
               let applied = 0;
-              for (const t of uncat) {
+              for (const t of viewList) {
                 if (!isEmptyDesc(t.description)) continue;
                 const label = `${t.amount >= 0 ? "Recebimento" : "Pagamento"} R$ ${Math.abs(t.amount).toFixed(2)}`;
                 Store.updateTransaction(t.id, { description: label });
@@ -1214,7 +1220,7 @@ function renderReconcile() {
             onClick: () => {
               if (!confirm(`⚠️ EXCLUIR ${emptyDescCount} transações sem descrição?\n\nAção irreversível. Use se foram importadas por engano (ex: Pluggy sandbox).`)) return;
               if (!confirm(`Tem certeza? Isso vai remover ${emptyDescCount} transações do banco local.`)) return;
-              const ids = uncat.filter(t => isEmptyDesc(t.description)).map(t => t.id);
+              const ids = viewList.filter(t => isEmptyDesc(t.description)).map(t => t.id);
               Store.data.transactions = Store.data.transactions.filter(t => !ids.includes(t.id));
               Store._save();
               alert(`🗑️ ${ids.length} transações excluídas`);
@@ -1224,7 +1230,7 @@ function renderReconcile() {
           suggestedCount > 0 && h("button", { class: "btn btn-gradient text-xs", onClick: () => {
             if (!confirm(`Aplicar categorização automática da IA em ${suggestedCount} transações?`)) return;
             let applied = 0;
-            for (const t of uncat) {
+            for (const t of viewList) {
               const sug = AI.suggestCategory(t.description);
               if (sug) { Store.updateTransaction(t.id, { category_id: sug }); applied++; }
             }
@@ -1236,7 +1242,7 @@ function renderReconcile() {
       emptyDescCount > 0 && h("div", { class: "text-xs", style: "color:var(--warn,#f59e0b); margin-top:6px" },
         `⚠️ ${emptyDescCount} transações sem descrição — clique no campo tracejado para preencher manualmente, ou use o botão ✏️ acima para preencher todas de uma vez.`),
       h("div", { class: "text-xs text-muted mt-2 mb-2" }, "Mostrando as 50 primeiras. Use o botão acima para aplicar a categorização em massa."),
-      h("div", { class: "list scroll-y", style: "max-height:400px" }, ...uncat.slice(0, 50).map(t => {
+      h("div", { class: "list scroll-y", style: "max-height:400px" }, ...(uncat.length ? uncat : explicitOther).slice(0, 50).map(t => {
         const suggestion = AI.suggestCategory(t.description);
         const suggestCat = suggestion ? Store.categoryById(suggestion) : null;
         const desc = (t.description || "").trim();
