@@ -1205,6 +1205,18 @@ function renderReconcile() {
               navigate();
             }
           }, `✏️ Preencher ${emptyDescCount} vazias`),
+          emptyDescCount > 0 && h("button", { class: "btn btn-outline text-xs", style: "color:#ef4444; border-color:#ef4444",
+            title: "Exclui permanentemente as transações sem descrição",
+            onClick: () => {
+              if (!confirm(`⚠️ EXCLUIR ${emptyDescCount} transações sem descrição?\n\nAção irreversível. Use se foram importadas por engano (ex: Pluggy sandbox).`)) return;
+              if (!confirm(`Tem certeza? Isso vai remover ${emptyDescCount} transações do banco local.`)) return;
+              const ids = uncat.filter(t => isEmptyDesc(t.description)).map(t => t.id);
+              Store.data.transactions = Store.data.transactions.filter(t => !ids.includes(t.id));
+              Store._save();
+              alert(`🗑️ ${ids.length} transações excluídas`);
+              navigate();
+            }
+          }, `🗑️ Excluir ${emptyDescCount} vazias`),
           suggestedCount > 0 && h("button", { class: "btn btn-gradient text-xs", onClick: () => {
             if (!confirm(`Aplicar categorização automática da IA em ${suggestedCount} transações?`)) return;
             let applied = 0;
