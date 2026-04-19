@@ -1187,7 +1187,10 @@ function renderReconcile() {
   const explicitOther = Store.data.transactions.filter(t => t.category_id === "cat_other");
   const viewList = uncat.length ? uncat : explicitOther;
   if (uncat.length || explicitOther.length) {
-    const suggestedCount = viewList.filter(t => AI.suggestCategory(t.description)).length;
+    const suggestedCount = viewList.filter(t => {
+      const s = AI.suggestCategory(t.description);
+      return s && s !== t.category_id;
+    }).length;
     const emptyDescCount = viewList.filter(t => isEmptyDesc(t.description)).length;
     wrap.append(h("div", { class: "card mb-3" },
       h("div", { class: "flex gap-2 items-center", style: "flex-wrap:wrap; justify-content:space-between" },
@@ -1232,7 +1235,7 @@ function renderReconcile() {
             let applied = 0;
             for (const t of viewList) {
               const sug = AI.suggestCategory(t.description);
-              if (sug) { Store.updateTransaction(t.id, { category_id: sug }); applied++; }
+              if (sug && sug !== t.category_id) { Store.updateTransaction(t.id, { category_id: sug }); applied++; }
             }
             alert(`✅ ${applied} transações categorizadas automaticamente`);
             navigate();
@@ -1244,7 +1247,8 @@ function renderReconcile() {
       h("div", { class: "text-xs text-muted mt-2 mb-2" }, "Mostrando as 50 primeiras. Use o botão acima para aplicar a categorização em massa."),
       h("div", { class: "list scroll-y", style: "max-height:400px" }, ...(uncat.length ? uncat : explicitOther).slice(0, 50).map(t => {
         const suggestion = AI.suggestCategory(t.description);
-        const suggestCat = suggestion ? Store.categoryById(suggestion) : null;
+        // Só considera sugestão se for DIFERENTE da categoria atual (evita "Aplicar Outros" em tx já em Outros)
+        const suggestCat = (suggestion && suggestion !== t.category_id) ? Store.categoryById(suggestion) : null;
         const desc = (t.description || "").trim();
         // Considera descrição vazia também quando é só separadores/traços/pontos
         const emptyDesc = !desc || /^[-._\s·•–—]+$/.test(desc);

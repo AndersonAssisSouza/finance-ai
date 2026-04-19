@@ -340,8 +340,8 @@ function suggestCategory(description) {
     { r: /^uber(?!\s*eats)|99app|99 app|\bpop\s?99|cabify|indriver/, c: "cat_rideshare" },
     // Combustível
     { r: /posto |shell |ipiranga|br mania|petrobras|brasilpetro|combusti|gasolin/, c: "cat_fuel" },
-    // Estacionamento / transporte
-    { r: /allpark|estapar|zona azul|estacion|bus servi|onibus|metro|cptm|bilhete|rodoviari/, c: "cat_transit" },
+    // Estacionamento / transporte público
+    { r: /allpark|estapar|zona azul|estacion|bus servi|onibus|metro|cptm|bilhete|rodoviari|rotativo|debito rotativo|rotativo digital/, c: "cat_transit" },
     // Supermercado
     { r: /mercado|supermerc|carrefour|atacad|dma |pao de ac|extra |assai|bh supermer|bretas|epa\b|verdemar|hortifrut|alimentar carnes|carnes nobre|ki gas|comercial irmaos|distribuidora|super varejao|varejao|emporio casa branca|feira no epa|feira livre|organizacoes junqueira|sacolao|quitanda/, c: "cat_grocery" },
     // Restaurante / comida
@@ -387,8 +387,8 @@ function suggestCategory(description) {
     { r: /cabelo|barbear|barbeiro|salao de beleza|sal[aã]o |manicure|pedicure|estetic|spa |massag|depila|escova|progressiva|sobrancelha/, c: "cat_personal" },
     // Pagamento de cartão de crédito
     { r: /pagamento (de )?fatura|pagamento cart[aã]o|fatura cart[aã]o|pg cart|^fatura \b|^fatura\s+cartao/, c: "cat_card_payment" },
-    // Impostos (DARF, IPVA, IPTU, ICMS, ISS, ITR, ITCMD, ITBI, receita federal, etc.)
-    { r: /\bdarf\b|\bipva\b|\biptu\b|\bitr\b|\bitcmd\b|\bitbi\b|\biss\b|\bicms\b|\bipi\b|\bcofins\b|\bpis\b|\bcsll\b|\birrf\b|receita federal|sec\.?\s*(da\s*)?fazenda|secretaria (da )?fazenda|sefaz|detran.*licenciamento|imposto\b|^irpf\b|^irpj\b|contribui[çc][aã]o sindical|das mei|das simples|carn[eê] le[aã]o|carnet le[aã]o|guia (de )?recolhimento|gare |gnre |licenciamento veicular|taxa (de )?licenciamento|dpvat/, c: "cat_taxes" },
+    // Impostos federais/estaduais/municipais + IOF (imposto sobre operações financeiras)
+    { r: /\bdarf\b|\bipva\b|\biptu\b|\bitr\b|\bitcmd\b|\bitbi\b|\biss\b|\bicms\b|\bipi\b|\bcofins\b|\bpis\b|\bcsll\b|\birrf\b|\biof\b|iof internacional|iof cambio|iof c[aâ]mbio|receita federal|sec\.?\s*(da\s*)?fazenda|secretaria (da )?fazenda|sefaz|detran.*licenciamento|imposto\b|^irpf\b|^irpj\b|contribui[çc][aã]o sindical|das mei|das simples|carn[eê] le[aã]o|carnet le[aã]o|guia (de )?recolhimento|gare |gnre |licenciamento veicular|taxa (de )?licenciamento|dpvat/, c: "cat_taxes" },
     // Previdência social (INSS)
     { r: /\binss\b|guia previdenc|gps /, c: "cat_pension" },
     // Previdência privada
@@ -401,10 +401,10 @@ function suggestCategory(description) {
     { r: /cheque especial|juros cheque|juros rotativo|encargo financeiro|mora /, c: "cat_interest" },
     // Subscription (apps pagos que não são streaming de mídia)
     { r: /notion subscription|figma subscription|1password|dropbox subscript|icloud|google (one|workspace)|microsoft (365|office)/, c: "cat_subscription" },
-    // Taxas / tarifas / IOF / débito rotativo (sobra — vai para Juros não Outros)
-    { r: /^iof\b|^tarifa|^anuidade|debito rotativo|rotativo digital|^tac\s/, c: "cat_interest" },
-    // Câmbio / remessa internacional
-    { r: /^wise\b|^wize\b|remessa online|paypal|nomad|c6 global|western union|santander cambio/, c: "cat_other" },
+    // Taxas bancárias / anuidade / TAC (não-imposto)
+    { r: /^tarifa\b|^anuidade\b|^tac\s|tarifa bancaria|anuidade cart/, c: "cat_interest" },
+    // Cartão internacional / câmbio (Wise/Wize = crédito cartão internacional)
+    { r: /^wise\b|^wize\b|remessa online|paypal|nomad|c6 global|western union|santander cambio|revolut|cart[aã]o internacional/, c: "cat_card_payment" },
     // Descrições genéricas que viram "outros"
     { r: /^outras?\s+despesas?\s*$|^diversos\s*$|^geral\s*$/, c: "cat_other" },
   ];
