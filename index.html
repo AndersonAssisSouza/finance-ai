@@ -2,11 +2,23 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#6366f1">
 <title>Finance AI</title>
 <meta http-equiv="refresh" content="0; url=./frontend/">
 <link rel="canonical" href="./frontend/">
+<style>
+  html,body{margin:0;padding:0;height:100%;background:#0b1220;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:flex;align-items:center;justify-content:center;text-align:center}
+  a{color:#8b5cf6;text-decoration:none;font-weight:600}
+  .spin{width:40px;height:40px;border:3px solid #334155;border-top-color:#6366f1;border-radius:50%;animation:s 1s linear infinite;margin:0 auto 16px}
+  @keyframes s{to{transform:rotate(360deg)}}
+</style>
 </head>
 <body>
-<p>Redirecionando para <a href="./frontend/">Finance AI</a>…</p>
+<div>
+  <div class="spin"></div>
+  <p>Carregando <a href="./frontend/">Finance AI</a>…</p>
+</div>
+<script>location.replace("./frontend/");</script>
 </body>
 </html>
