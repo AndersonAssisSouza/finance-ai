@@ -6,17 +6,26 @@
 <meta name="theme-color" content="#6366f1">
 <title>Finance AI — Controle financeiro inteligente</title>
 <meta name="description" content="Sistema completo de gestão financeira pessoal com IA, conciliação bancária Pluggy, orçamentos, metas, investimentos e simulador FIRE.">
-<meta name="app-version" content="3.7.6">
-<link rel="manifest" href="./manifest.json?v=376">
+<meta name="app-version" content="3.9.0">
+<link rel="manifest" href="./manifest.json?v=390">
 <link rel="icon" type="image/svg+xml" href="./icon.svg">
 <link rel="apple-touch-icon" href="./icon.svg">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Finance AI">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5, viewport-fit=cover">
+<meta name="format-detection" content="telephone=no">
+<meta name="msapplication-TileColor" content="#6366f1">
+<!-- Open Graph -->
+<meta property="og:title" content="Finance AI — Controle financeiro inteligente">
+<meta property="og:description" content="Gestor financeiro pessoal com IA, conciliação Pluggy, orçamentos, metas e FIRE.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="./icon.svg">
 <script>
 /* === Cache-busting: força limpeza se versão antiga detectada === */
 (async () => {
-  const V = "3.7.6";
+  const V = "3.9.0";
   const prev = localStorage.getItem("fa_app_version");
   if (prev && prev !== V) {
     // Versão antiga — limpa tudo e recarrega
@@ -37,7 +46,7 @@
   localStorage.setItem("fa_app_version", V);
 })();
 </script>
-<link rel="stylesheet" href="./styles.css?v=376">
+<link rel="stylesheet" href="./styles.css?v=390">
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
 <script src="https://cdn.pluggy.ai/pluggy-connect/v2.9.2/pluggy-connect.js"></script>

@@ -5,22 +5,41 @@
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "orientation": "any",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "portrait-primary",
   "background_color": "#0b1220",
   "theme_color": "#6366f1",
   "lang": "pt-BR",
+  "dir": "ltr",
   "categories": ["finance", "productivity"],
   "icons": [
     {
       "src": "./icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
     }
   ],
   "shortcuts": [
-    { "name": "Dashboard", "url": "./#/dashboard" },
-    { "name": "Nova transação", "url": "./#/transactions" },
-    { "name": "Chat IA", "url": "./#/chat" }
+    { "name": "Dashboard", "short_name": "Dashboard", "url": "./#/dashboard", "description": "Visão geral das finanças" },
+    { "name": "Nova transação", "short_name": "Nova tx", "url": "./#/transactions", "description": "Adicionar transação" },
+    { "name": "Conciliar", "short_name": "Conciliar", "url": "./#/reconcile", "description": "Importar extratos e categorizar" },
+    { "name": "Chat IA", "short_name": "IA", "url": "./#/chat", "description": "Assistente financeiro" }
+  ],
+  "prefer_related_applications": false,
+  "screenshots": [
+    {
+      "src": "./icon.svg",
+      "sizes": "540x720",
+      "type": "image/svg+xml",
+      "form_factor": "narrow",
+      "label": "Dashboard mobile"
+    }
   ]
 }
