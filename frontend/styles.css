@@ -170,14 +170,18 @@ h1,h2,h3,h4 { font-weight: 600; }
 
 /* === GRID === */
 .grid { display: grid; gap: 16px; }
+.grid-5 { grid-template-columns: repeat(5, 1fr); }
 .grid-4 { grid-template-columns: repeat(4, 1fr); }
 .grid-3 { grid-template-columns: repeat(3, 1fr); }
 .grid-2 { grid-template-columns: repeat(2, 1fr); }
 .col-span-2 { grid-column: span 2; }
 .col-span-3 { grid-column: span 3; }
 .col-span-4 { grid-column: span 4; }
+@media (max-width: 1200px) {
+  .grid-5 { grid-template-columns: repeat(3, 1fr); }
+}
 @media (max-width: 1000px) {
-  .grid-4, .grid-3 { grid-template-columns: repeat(2, 1fr); }
+  .grid-5, .grid-4, .grid-3 { grid-template-columns: repeat(2, 1fr); }
   .col-span-2, .col-span-3, .col-span-4 { grid-column: span 2; }
 }
 @media (max-width: 640px) {
@@ -188,7 +192,7 @@ h1,h2,h3,h4 { font-weight: 600; }
     padding-top: calc(20px + env(safe-area-inset-top));
   }
   .sidebar.open { transform: translateX(0); box-shadow: 4px 0 24px rgba(0,0,0,.3); }
-  .grid-4, .grid-3, .grid-2 { grid-template-columns: 1fr; }
+  .grid-5, .grid-4, .grid-3, .grid-2 { grid-template-columns: 1fr; }
   .col-span-2, .col-span-3, .col-span-4 { grid-column: span 1; }
   .main { padding: 14px 12px; padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
   .main-head h1 { font-size: 20px; }

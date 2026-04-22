@@ -329,12 +329,26 @@ function renderDashboard() {
     )
   );
 
-  // KPIs
-  wrap.append(h("div", { class: "grid grid-4 mb-4" },
+  // Separa saldos: bancos (checking/savings/investment) vs dinheiro (wallet)
+  const accs = Store.accounts();
+  const baseCur = FX.userCurrency();
+  const saldoBancos = accs
+    .filter(a => a.include_in_net_worth && a.type !== "wallet")
+    .reduce((s, a) => s + (window.FX ? FX.convertSync(Store.accountBalance(a.id), a.currency || baseCur, baseCur) : Store.accountBalance(a.id)), 0);
+  const saldoDinheiro = accs
+    .filter(a => a.include_in_net_worth && a.type === "wallet")
+    .reduce((s, a) => s + (window.FX ? FX.convertSync(Store.accountBalance(a.id), a.currency || baseCur, baseCur) : Store.accountBalance(a.id)), 0);
+  const qtdBancos = accs.filter(a => a.type !== "wallet").length;
+  const qtdCarteira = accs.filter(a => a.type === "wallet").length;
+
+  // KPIs: 5 cards
+  wrap.append(h("div", { class: "grid grid-5 mb-4" },
     kpiCard("Patrimônio líquido", fmt(nw.net), h("div", { class: "delta" },
       `Ativos ${fmt(nw.assets)} • Passivos ${fmt(nw.liabilities)}`), true),
-    kpiCard("Saldo em contas", fmt(nw.breakdown.cash),
-      h("div", { class: "delta" }, `${Store.accounts().length} conta(s)`)),
+    kpiCard("🏦 Saldo em contas", fmt(saldoBancos),
+      h("div", { class: "delta" }, `${qtdBancos} banco(s)`)),
+    kpiCard("💵 Saldo em dinheiro", fmt(saldoDinheiro),
+      h("div", { class: "delta" }, `${qtdCarteira} carteira(s)`)),
     kpiCard("Entradas (mês)", fmt(ms.income),
       h("div", { class: "delta" }, "💰")),
     kpiCard("Saídas (mês)", fmt(ms.expense),
