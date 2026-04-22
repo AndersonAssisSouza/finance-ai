@@ -5095,6 +5095,7 @@ window.enterApp = function() {
       Automations.runDailyIfNeeded();
     }
     if (window.Bot && Bot.isConfigured()) Bot.start();
+    if (window.MarketMonitor) MarketMonitor.start();
   }, 150);
 };
 
