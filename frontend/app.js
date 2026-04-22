@@ -581,7 +581,7 @@ function renderAccounts() {
       ),
       h("div", { class: "text-2xl font-bold mt-2" }, FX.format(bal, cur)),
       converted !== null && h("div", { class: "text-xs text-muted" }, "≈ ", FX.format(converted, baseCur)),
-      h("div", { class: "text-xs text-muted" }, `Saldo inicial: ${FX.format(a.initial_balance, cur)}`),
+      h("div", { class: "text-xs text-muted" }, `Ponto de partida: ${FX.format(a.initial_balance, cur)}`),
       h("div", { class: "flex gap-2 mt-3" },
         h("button", { class: "btn btn-outline text-xs", onClick: () => { location.hash = `#/transactions?account=${a.id}`; } }, "Ver transações"),
         h("button", { class: "btn btn-ghost text-xs", style: "color:var(--danger)", onClick: () => {
@@ -1898,9 +1898,19 @@ function openNewTx() {
 }
 
 function openAccountModal(existing) {
-  const s = existing || { name: "", type: "checking", initial_balance: 0, currency: FX.userCurrency(), color: "#6366f1", icon: "🏦", include_in_net_worth: true };
+  // Ao EDITAR: mostra saldo calculado (atual) no input.
+  // Ao CRIAR: saldo inicial = saldo informado (é o saldo de hoje).
+  const saldoHoje = existing ? Store.accountBalance(existing.id) : 0;
+  const s = existing || { name: "", type: "checking", currency: FX.userCurrency(), color: "#6366f1", icon: "🏦", include_in_net_worth: true };
+
+  const label = existing ? "Saldo atual (hoje)" : "Saldo atual (hoje)";
+  const hint = existing
+    ? "Se mudar, será criado um lançamento de ajuste automático."
+    : "Digite o saldo que está no banco hoje. Esse é seu ponto de partida.";
+
   const body = h("div", {},
-    h("label", { class: "field" }, h("span", { class: "lbl" }, "Nome"), h("input", { id: "ac-name", class: "input", value: s.name })),
+    h("label", { class: "field" }, h("span", { class: "lbl" }, "Nome"),
+      h("input", { id: "ac-name", class: "input", value: s.name })),
     h("div", { class: "field-row" },
       h("label", { class: "field" }, h("span", { class: "lbl" }, "Tipo"),
         h("select", { id: "ac-type", class: "select" },
@@ -1915,24 +1925,55 @@ function openAccountModal(existing) {
           ...FX.SUPPORTED.map(c => h("option", { value: c.code, selected: c.code === (s.currency || FX.userCurrency()) }, `${c.symbol}  ${c.code}`))))
     ),
     h("div", { class: "field-row" },
-      h("label", { class: "field" }, h("span", { class: "lbl" }, "Saldo inicial"),
-        h("input", { id: "ac-bal", class: "input", type: "text", inputmode: "decimal", step: ".01", value: s.initial_balance })),
+      h("label", { class: "field" }, h("span", { class: "lbl" }, label),
+        h("input", { id: "ac-bal", class: "input", type: "text", inputmode: "decimal", step: ".01",
+          value: existing ? saldoHoje.toFixed(2).replace(".", ",") : "" })),
       h("label", { class: "field" }, h("span", { class: "lbl" }, "Ícone"),
         h("input", { id: "ac-icon", class: "input", value: s.icon }))
     ),
     h("label", { class: "field" }, h("span", { class: "lbl" }, "Cor"),
-      h("input", { id: "ac-color", class: "input", type: "color", value: s.color }))
+      h("input", { id: "ac-color", class: "input", type: "color", value: s.color })),
+    h("div", { class: "text-xs text-muted mt-2" }, hint)
   );
+
   openModal((existing ? "Editar" : "+ Nova") + " conta", body, [{
     label: "Salvar", class: "btn-gradient", onClick: () => {
+      const novoSaldo = num($("#ac-bal").value);
       const data = {
-        name: $("#ac-name").value, type: $("#ac-type").value,
-        initial_balance: num($("#ac-bal").value), currency: $("#ac-currency").value,
-        color: $("#ac-color").value, icon: $("#ac-icon").value, include_in_net_worth: true
+        name: $("#ac-name").value.trim(),
+        type: $("#ac-type").value,
+        currency: $("#ac-currency").value,
+        color: $("#ac-color").value,
+        icon: $("#ac-icon").value,
+        include_in_net_worth: true
       };
-      if (existing) Store.updateAccount(existing.id, data);
-      else Store.addAccount(data);
-      closeModal(); navigate();
+      if (!data.name) return alert("⚠️ Informe o nome da conta");
+
+      if (existing) {
+        // Atualiza metadados (sem mexer no initial_balance)
+        Store.updateAccount(existing.id, data);
+        // Se saldo mudou, cria transação de ajuste
+        const saldoCalculado = Store.accountBalance(existing.id);
+        const diff = +(novoSaldo - saldoCalculado).toFixed(2);
+        if (Math.abs(diff) > 0.01) {
+          Store.addTransaction({
+            description: diff > 0 ? "Ajuste de saldo (entrada)" : "Ajuste de saldo (saída)",
+            amount: diff,
+            date: new Date().toISOString().slice(0, 10),
+            account_id: existing.id,
+            category_id: diff > 0 ? "cat_other_in" : "cat_other",
+            type: diff > 0 ? "income" : "expense",
+            tags: ["ajuste"]
+          });
+          alert(`✅ Saldo ajustado para ${fmt(novoSaldo)}\n\nLançamento de ajuste criado: ${fmt(diff)}`);
+        }
+      } else {
+        // Nova conta: saldo informado vira initial_balance
+        data.initial_balance = novoSaldo;
+        Store.addAccount(data);
+      }
+      closeModal();
+      navigate();
     }
   }]);
 }
