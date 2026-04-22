@@ -47,7 +47,7 @@ function monthLabel(ym) {
   return new Date(+y, +m - 1, 1).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
 }
 
-const App = { charts: {}, currentMonth: monthKey() };
+const App = { charts: {}, currentMonth: monthKey(), statementsPeriod: "year", statementsYear: String(new Date().getFullYear()) };
 
 /* ============ ROUTER ============ */
 const routes = {
@@ -314,6 +314,8 @@ function renderDashboard() {
   const nw = Store.netWorth();
   const ms = Store.monthSummary();
   const prev = Store.monthSummary(addMonths(App.currentMonth, -1));
+  const currentYear = String(new Date().getFullYear());
+  const ys = Store.yearSummary(currentYear);
   const score = AI.financialScore(Store);
   const ef = AI.emergencyFund(Store);
   const ins = AI.insights(Store);
@@ -385,6 +387,31 @@ function renderDashboard() {
       h("div", { class: "list" }, ...(ins.slice(0, 4).map(renderInsightItem)),
         ins.length === 0 && h("div", { class: "empty" }, h("div", { class: "icon" }, "✨"), "Adicione transações para ver insights"))
     )
+  ));
+
+  // DRE Resumido do ano corrente
+  const yearResultado = ys.income - ys.expense;
+  const yearMargem = ys.income > 0 ? (yearResultado / ys.income * 100) : 0;
+  wrap.append(h("div", { class: "card mb-4" },
+    h("h3", {}, `📈 DRE resumido — ${currentYear}`,
+      h("a", { href: "#/statements", class: "badge brand pointer" }, "Ver completa →")),
+    h("div", { class: "grid grid-4" },
+      kpiCard("Receitas (ano)", fmt(ys.income),
+        h("div", { class: "delta" }, `Média ${fmt(ys.avg_monthly_income)}/mês`)),
+      kpiCard("Despesas (ano)", fmt(ys.expense),
+        h("div", { class: "delta" }, `Média ${fmt(ys.avg_monthly_expense)}/mês`)),
+      kpiCard("Resultado", fmt(yearResultado),
+        h("div", { class: `delta ${yearResultado >= 0 ? "pos" : "neg"}` },
+          yearResultado >= 0 ? "Superávit" : "Déficit")),
+      kpiCard("Taxa de poupança", `${ys.savings_rate}%`,
+        h("div", { class: `delta ${ys.savings_rate >= 20 ? "pos" : ys.savings_rate >= 10 ? "" : "neg"}` },
+          ys.savings_rate >= 20 ? "Excelente" : ys.savings_rate >= 10 ? "Ok" : "Baixa"))
+    ),
+    ys.months_with_data === 0 || (ys.income === 0 && ys.expense === 0)
+      ? h("div", { class: "text-xs text-muted mt-3", style: "padding:8px;background:rgba(245,158,11,.1);border-radius:6px" },
+        `⚠️ Ainda não há transações lançadas em ${currentYear}. Lance uma transação para ver o DRE populado.`)
+      : h("div", { class: "text-xs text-muted mt-3" },
+        `Base: ${ys.months_with_data} mês(es) com movimentação em ${currentYear}.`)
   ));
 
   // Gráfico fluxo + top categorias
@@ -3359,10 +3386,61 @@ function renderCloudSection() {
 /* ============ STATEMENTS (DRE + Balanço) ============ */
 function renderStatements() {
   const wrap = h("div", {});
-  wrap.append(pageHead("DRE & Balanço Patrimonial", "Demonstrativos contábeis simplificados", monthPicker()));
 
+  // Período default: ano corrente
+  if (!App.statementsPeriod) App.statementsPeriod = "year";
+  if (!App.statementsYear) App.statementsYear = String(new Date().getFullYear());
+
+  const period = App.statementsPeriod;
+  const year = App.statementsYear;
   const month = App.currentMonth;
-  const txs = Store.listTransactions({ month });
+
+  // Construir os filtros
+  const yearsAvailable = [...new Set(Store.listTransactions().map(t => t.date.slice(0,4)))]
+    .sort((a,b) => b.localeCompare(a));
+  if (!yearsAvailable.length) yearsAvailable.push(year);
+  if (!yearsAvailable.includes(year)) yearsAvailable.unshift(year);
+
+  const periodToggle = h("div", { class: "flex items-center gap-2", style: "flex-wrap:wrap" },
+    h("div", { class: "flex items-center gap-1", style: "background:var(--bg-2); border-radius:8px; padding:3px" },
+      h("button", {
+        class: "btn " + (period === "year" ? "btn-gradient" : "btn-ghost"),
+        style: "padding:6px 14px; font-size:13px",
+        onClick: () => { App.statementsPeriod = "year"; navigate(); }
+      }, "Ano"),
+      h("button", {
+        class: "btn " + (period === "month" ? "btn-gradient" : "btn-ghost"),
+        style: "padding:6px 14px; font-size:13px",
+        onClick: () => { App.statementsPeriod = "month"; navigate(); }
+      }, "Mês"),
+      h("button", {
+        class: "btn " + (period === "all" ? "btn-gradient" : "btn-ghost"),
+        style: "padding:6px 14px; font-size:13px",
+        onClick: () => { App.statementsPeriod = "all"; navigate(); }
+      }, "Tudo")
+    ),
+    period === "year" && (() => {
+      const sel = h("select", { class: "select", style: "min-width:110px" });
+      for (const y of yearsAvailable) {
+        sel.appendChild(h("option", { value: y, selected: y === year }, y));
+      }
+      sel.onchange = e => { App.statementsYear = e.target.value; navigate(); };
+      return sel;
+    })(),
+    period === "month" && monthPicker()
+  );
+
+  const periodLabel = period === "year" ? `Ano ${year}` :
+                      period === "month" ? monthLabel(month) :
+                      "Histórico completo";
+
+  wrap.append(pageHead("DRE & Balanço Patrimonial", `Demonstrativos contábeis — ${periodLabel}`, periodToggle));
+
+  // Filtrar transações
+  const filter = period === "year" ? { year } :
+                 period === "month" ? { month } :
+                 {};
+  const txs = Store.listTransactions(filter);
   const base = FX.userCurrency();
 
   // DRE
@@ -3379,33 +3457,52 @@ function renderStatements() {
   const resultado = totalRev - totalExp;
   const margem = totalRev > 0 ? (resultado / totalRev * 100) : 0;
 
+  // Para visão anual, calcular média mensal
+  const monthsInPeriod = new Set(txs.map(t => t.date.slice(0,7))).size || 1;
+  const showAvg = period !== "month" && monthsInPeriod > 1;
+
   wrap.append(h("div", { class: "card mb-3" },
-    h("h3", {}, "📈 DRE — Demonstração do Resultado"),
+    h("h3", {}, `📈 DRE — Demonstração do Resultado — ${periodLabel}`,
+      txs.length === 0 && h("span", { class: "badge warn" }, "sem transações")),
     h("div", { class: "table-wrap" },
       h("table", { class: "table" },
-        h("thead", {}, h("tr", {}, h("th", {}, "Conta"), h("th", { style: "text-align:right" }, "Valor"))),
+        h("thead", {}, h("tr", {},
+          h("th", {}, "Conta"),
+          h("th", { style: "text-align:right" }, "Valor"),
+          showAvg && h("th", { style: "text-align:right" }, "Média/mês")
+        )),
         h("tbody", {},
           h("tr", { style: "background:rgba(16,185,129,.08)" },
-            h("td", { class: "font-bold" }, "(+) RECEITAS"), h("td", { class: "font-bold", style: "text-align:right" }, fmt(totalRev))),
-          ...Object.entries(revenues).map(([g,v]) => h("tr", {},
+            h("td", { class: "font-bold" }, "(+) RECEITAS"),
+            h("td", { class: "font-bold", style: "text-align:right" }, fmt(totalRev)),
+            showAvg && h("td", { class: "font-bold text-muted", style: "text-align:right" }, fmt(totalRev/monthsInPeriod))),
+          ...Object.entries(revenues).sort((a,b) => b[1]-a[1]).map(([g,v]) => h("tr", {},
             h("td", { style: "padding-left:30px" }, g),
-            h("td", { style: "text-align:right" }, fmt(v))
+            h("td", { style: "text-align:right" }, fmt(v)),
+            showAvg && h("td", { class: "text-muted", style: "text-align:right" }, fmt(v/monthsInPeriod))
           )),
           h("tr", { style: "background:rgba(239,68,68,.08)" },
-            h("td", { class: "font-bold" }, "(−) DESPESAS"), h("td", { class: "font-bold", style: "text-align:right" }, fmt(totalExp))),
-          ...Object.entries(expenses).map(([g,v]) => h("tr", {},
+            h("td", { class: "font-bold" }, "(−) DESPESAS"),
+            h("td", { class: "font-bold", style: "text-align:right" }, fmt(totalExp)),
+            showAvg && h("td", { class: "font-bold text-muted", style: "text-align:right" }, fmt(totalExp/monthsInPeriod))),
+          ...Object.entries(expenses).sort((a,b) => b[1]-a[1]).map(([g,v]) => h("tr", {},
             h("td", { style: "padding-left:30px" }, g),
-            h("td", { style: "text-align:right" }, fmt(v))
+            h("td", { style: "text-align:right" }, fmt(v)),
+            showAvg && h("td", { class: "text-muted", style: "text-align:right" }, fmt(v/monthsInPeriod))
           )),
           h("tr", { style: "background:var(--brand-grad); color:white" },
             h("td", { class: "font-bold" }, "(=) RESULTADO LÍQUIDO"),
-            h("td", { class: "font-bold", style: "text-align:right" }, fmt(resultado))),
+            h("td", { class: "font-bold", style: "text-align:right" }, fmt(resultado)),
+            showAvg && h("td", { class: "font-bold", style: "text-align:right" }, fmt(resultado/monthsInPeriod))),
           h("tr", {},
             h("td", { class: "text-muted" }, "Margem líquida"),
-            h("td", { class: "text-muted", style: "text-align:right" }, margem.toFixed(1) + "%"))
+            h("td", { class: "text-muted", style: "text-align:right" }, margem.toFixed(1) + "%"),
+            showAvg && h("td", {}))
         )
       )
-    )
+    ),
+    showAvg && h("div", { class: "text-xs text-muted mt-2" },
+      `Base: ${monthsInPeriod} mês(es) com movimentação • ${txs.length} transação(ões)`)
   ));
 
   // Balanço Patrimonial
@@ -3450,10 +3547,10 @@ function renderStatements() {
       `Expresso em ${base}. Todas as posições em outras moedas foram convertidas pela cotação mais recente.`)
   ));
 
-  // Por centro de custo (se empresarial)
+  // Por centro de custo (se empresarial) — usa o mesmo periodo filtrado
   if (Store.isBusinessMode() && Store.costCenters().length) {
     wrap.append(h("div", { class: "card" },
-      h("h3", {}, "🏢 Resultado por Centro de Custo — " + monthLabel(month)),
+      h("h3", {}, "🏢 Resultado por Centro de Custo — " + periodLabel),
       h("div", { class: "table-wrap" },
         h("table", { class: "table" },
           h("thead", {}, h("tr", {}, h("th", {}, "Centro"), h("th", {}, "Receita"), h("th", {}, "Despesa"), h("th", {}, "Resultado"), h("th", {}, "Margem"))),

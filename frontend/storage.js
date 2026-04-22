@@ -320,9 +320,12 @@ class FinanceStore {
     const t = this.data.transactions.find(x => x.id === id);
     if (t) { Object.assign(t, patch); this._save(); }
   }
-  listTransactions({ month, account_id, card_id, category_id, type, search, limit } = {}) {
+  listTransactions({ month, year, date_from, date_to, account_id, card_id, category_id, type, search, limit } = {}) {
     let ts = [...(this.data?.transactions || [])];
     if (month) ts = ts.filter(t => t.date.slice(0,7) === month);
+    if (year) ts = ts.filter(t => t.date.slice(0,4) === String(year));
+    if (date_from) ts = ts.filter(t => t.date >= date_from);
+    if (date_to) ts = ts.filter(t => t.date <= date_to);
     if (account_id) ts = ts.filter(t => t.account_id === account_id);
     if (card_id) ts = ts.filter(t => t.card_id === card_id);
     if (category_id) ts = ts.filter(t => t.category_id === category_id);
@@ -480,6 +483,23 @@ class FinanceStore {
     const income = txs.filter(t => t.type === "income").reduce((s,t) => s + t.amount, 0);
     const expense = Math.abs(txs.filter(t => t.type === "expense").reduce((s,t) => s + t.amount, 0));
     return { income: +income.toFixed(2), expense: +expense.toFixed(2), net: +(income - expense).toFixed(2) };
+  }
+
+  yearSummary(year = String(new Date().getFullYear())) {
+    const txs = this.listTransactions({ year });
+    const income = txs.filter(t => t.type === "income").reduce((s,t) => s + t.amount, 0);
+    const expense = Math.abs(txs.filter(t => t.type === "expense").reduce((s,t) => s + t.amount, 0));
+    const months = new Set(txs.map(t => t.date.slice(0,7))).size || 1;
+    return {
+      year,
+      income: +income.toFixed(2),
+      expense: +expense.toFixed(2),
+      net: +(income - expense).toFixed(2),
+      months_with_data: months,
+      avg_monthly_income: +(income / months).toFixed(2),
+      avg_monthly_expense: +(expense / months).toFixed(2),
+      savings_rate: income > 0 ? +((income - expense) / income * 100).toFixed(1) : 0
+    };
   }
 
   /* === RECURRENCES === */
