@@ -892,12 +892,23 @@ function renderInvestments() {
   const totalInvested = inv.reduce((s,i) => s + i.quantity * i.avg_price, 0);
   const profit = totalCurrent - totalInvested;
   const pct = totalInvested > 0 ? (profit / totalInvested * 100) : 0;
+  const liquidTotal = inv.filter(x => x.is_liquid === true)
+    .reduce((s,x) => s + x.quantity * x.current_price, 0);
 
   wrap.append(h("div", { class: "grid grid-3 mb-3" },
     kpiCard("Carteira atual", fmt(totalCurrent), h("div", { class: "delta" }, "Posição de mercado"), true),
     kpiCard("Total investido", fmt(totalInvested)),
     kpiCard("Rentabilidade", `${pct.toFixed(1)}%`,
       h("div", { class: "delta " + (profit >= 0 ? "pos" : "neg") }, `${profit >= 0 ? "+" : ""}${fmt(profit)}`))
+  ));
+
+  // Callout sobre liquidez
+  wrap.append(h("div", { class: "card", style: "background:rgba(99,102,241,.06); border-left:3px solid var(--brand)" },
+    h("div", { class: "font-semi" }, "💧 Liquidez imediata na carteira: " + fmt(liquidTotal)),
+    h("div", { class: "text-xs text-muted mt-1" },
+      liquidTotal > 0
+        ? "Este valor conta como reserva de emergência. Previdência, FIIs, ações e renda fixa longa NÃO entram nessa conta."
+        : "Nenhum ativo marcado como líquido. Apenas dinheiro em contas bancárias está sendo considerado como reserva de emergência. Edite um investimento para marcar como líquido (ex.: Tesouro Selic D+0, CDB liquidez diária).")
   ));
 
   const table = h("div", { class: "card" },
@@ -915,8 +926,15 @@ function renderInvestments() {
         const pos = i.quantity * i.current_price;
         const invPos = i.quantity * i.avg_price;
         const p = invPos > 0 ? ((pos - invPos) / invPos * 100) : 0;
+        const nameCell = h("div", { class: "font-semi" }, i.name);
+        if (i.is_liquid === true) {
+          nameCell.appendChild(h("span", {
+            class: "badge ok",
+            style: "margin-left:6px; font-size:10px; padding:1px 6px"
+          }, "💧 Líquido"));
+        }
         return h("tr", {},
-          h("td", {}, h("div", { class: "font-semi" }, i.name),
+          h("td", {}, nameCell,
                       h("div", { class: "text-xs text-muted" }, `${i.ticker} • ${typeLabel(i.type)}`)),
           h("td", {}, i.quantity),
           h("td", {}, fmt(i.avg_price)),
@@ -936,7 +954,7 @@ function renderInvestments() {
   wrap.append(table);
   return wrap;
 }
-function typeLabel(t) { return { renda_fixa: "Renda fixa", acoes: "Ações", fii: "FII", cripto: "Cripto", etf: "ETF" }[t] || t; }
+function typeLabel(t) { return { renda_fixa: "Renda fixa", acoes: "Ações", fii: "FII", cripto: "Cripto", etf: "ETF", previdencia: "Previdência" }[t] || t; }
 
 /* ============ NET WORTH ============ */
 function renderNetWorth() {
@@ -1032,16 +1050,21 @@ function renderSavings() {
   wrap.append(h("div", { class: "card" },
     h("h3", {}, "🛡️ Reserva de emergência"),
     h("div", { class: "grid grid-3" },
-      kpiCard("Atual", fmt(ef.current)),
+      kpiCard("Atual (só líquido)", fmt(ef.current)),
       kpiCard("Alvo (6 meses)", fmt(ef.target)),
       kpiCard("Cobertura", `${ef.monthsCovered} meses`,
         h("div", { class: `delta ${ef.status === "ok" ? "pos" : "neg"}` },
           ef.gap > 0 ? `Falta ${fmt(ef.gap)}` : "Meta atingida"))
     ),
     h("div", { class: `progress ${ef.status} mt-3` },
-      h("div", { style: `width:${Math.min(100, ef.current/ef.target*100)}%` })),
-    h("div", { class: "text-sm mt-3 text-muted" },
-      "Mantenha em liquidez diária (Tesouro Selic, CDB 100% CDI com resgate imediato).")
+      h("div", { style: `width:${Math.min(100, ef.current/(ef.target||1)*100)}%` })),
+    h("div", { class: "text-sm mt-3", style: "padding:10px;background:rgba(99,102,241,.06);border-radius:8px" },
+      h("div", { class: "font-semi mb-1" }, "Composição (apenas liquidez imediata):"),
+      h("div", { class: "text-xs" }, "💼 Contas bancárias / carteira: " + fmt(ef.breakdown?.contas || 0)),
+      h("div", { class: "text-xs" }, "💧 Investimentos marcados como líquidos: " + fmt(ef.breakdown?.investimentos_liquidos || 0))
+    ),
+    h("div", { class: "text-xs mt-2 text-muted" },
+      "⚠️ Previdência privada, FIIs, ações e renda fixa longa NÃO entram. Mantenha a reserva em Tesouro Selic D+0 ou CDB 100% CDI com liquidez diária.")
   ));
 
   return wrap;
@@ -2093,7 +2116,7 @@ function openDebtModal() {
 }
 
 function openInvestmentModal(existing) {
-  const s = existing || { name: "", ticker: "", type: "renda_fixa", quantity: 1, avg_price: "", current_price: "" };
+  const s = existing || { name: "", ticker: "", type: "renda_fixa", quantity: 1, avg_price: "", current_price: "", is_liquid: false };
   const typeOpt = (val, label) =>
     h("option", { value: val, selected: s.type === val }, label);
 
@@ -2110,7 +2133,8 @@ function openInvestmentModal(existing) {
         typeOpt("acoes", "Ações"),
         typeOpt("fii", "FII"),
         typeOpt("etf", "ETF"),
-        typeOpt("cripto", "Cripto")
+        typeOpt("cripto", "Cripto"),
+        typeOpt("previdencia", "Previdência privada")
       )
     ),
     h("div", { class: "field-row" },
@@ -2120,7 +2144,14 @@ function openInvestmentModal(existing) {
         h("input", { id: "in-avg", class: "input", type: "text", inputmode: "decimal", value: s.avg_price }))
     ),
     h("label", { class: "field" }, h("span", { class: "lbl" }, "Preço atual / Saldo"),
-      h("input", { id: "in-cur", class: "input", type: "text", inputmode: "decimal", value: s.current_price }))
+      h("input", { id: "in-cur", class: "input", type: "text", inputmode: "decimal", value: s.current_price })),
+    h("label", { class: "field", style: "flex-direction:row;align-items:flex-start;gap:8px;padding:10px;background:rgba(99,102,241,.06);border:1px solid var(--border);border-radius:8px;margin-top:8px" },
+      h("input", { id: "in-liquid", type: "checkbox", style: "margin-top:3px", checked: s.is_liquid === true }),
+      h("div", {},
+        h("div", { class: "font-semi text-sm" }, "✅ Tem liquidez imediata (conta como reserva de emergência)"),
+        h("div", { class: "text-xs text-muted mt-1" }, "Marque APENAS se puder sacar TODO o valor em até 1 dia útil (ex.: Tesouro Selic D+0, CDB com liquidez diária, conta poupança). NÃO marque previdência, FIIs, ações, CDBs de prazo ou renda fixa longa.")
+      )
+    )
   );
   const title = existing ? "Editar investimento" : "+ Novo investimento";
   openModal(title, body, [{
@@ -2131,7 +2162,8 @@ function openInvestmentModal(existing) {
         type: $("#in-type").value,
         quantity: num($("#in-qty").value) || 1,
         avg_price: num($("#in-avg").value),
-        current_price: num($("#in-cur").value)
+        current_price: num($("#in-cur").value),
+        is_liquid: $("#in-liquid").checked === true
       };
       if (!data.name) return alert("⚠️ Informe o nome");
       if (!data.current_price) return alert("⚠️ Informe o preço atual / saldo");

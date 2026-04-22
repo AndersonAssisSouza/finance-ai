@@ -417,9 +417,10 @@ class FinanceStore {
 
   /* === INVESTMENTS === */
   investments() { return this.data?.investments || []; }
-  addInvestment({ name, ticker = "", type = "renda_fixa", quantity = 1, avg_price, current_price }) {
+  addInvestment({ name, ticker = "", type = "renda_fixa", quantity = 1, avg_price, current_price, is_liquid = false }) {
     const i = { id: uid("inv_"), name, ticker, type,
                 quantity: +quantity, avg_price: +avg_price, current_price: +current_price,
+                is_liquid: is_liquid === true,
                 created_at: now() };
     this.data.investments.push(i);
     this._save();

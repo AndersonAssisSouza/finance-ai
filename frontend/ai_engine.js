@@ -178,13 +178,19 @@ function emergencyFund(Store) {
   const expenses = months.map(m => Store.monthSummary(m).expense);
   const avgExpense = expenses.filter(x => x > 0).reduce((s,v) => s+v, 0) / (expenses.filter(x => x > 0).length || 1);
 
-  // reserva atual = soma contas marcadas "include_in_net_worth" + investimentos líquidos (renda fixa)
-  const savings = Store.accounts().filter(a => a.include_in_net_worth)
+  // Reserva = APENAS dinheiro com LIQUIDEZ IMEDIATA:
+  // - Contas bancárias (checking/savings/wallet) — sacável a qualquer momento
+  // - Investimentos explicitamente marcados como is_liquid=true (Tesouro Selic D+0, CDB liquidez diária)
+  // NÃO INCLUI: Previdência, FIIs, ações, renda fixa longa, cripto (mesmo que sejam renda fixa)
+  const liquidAccounts = Store.accounts()
+    .filter(a => a.include_in_net_worth !== false && a.type !== "investment")
     .reduce((s,a) => s + Math.max(0, Store.accountBalance(a.id)), 0);
-  const liquidInvest = Store.investments().filter(i => i.type === "renda_fixa")
+
+  const liquidInvestments = Store.investments()
+    .filter(i => i.is_liquid === true)
     .reduce((s,i) => s + i.quantity * i.current_price, 0);
 
-  const current = +(savings + liquidInvest).toFixed(2);
+  const current = +(liquidAccounts + liquidInvestments).toFixed(2);
   const target = +(avgExpense * 6).toFixed(2);
   const monthsCovered = avgExpense > 0 ? current / avgExpense : 0;
   return {
@@ -192,7 +198,11 @@ function emergencyFund(Store) {
     current, target,
     monthsCovered: +monthsCovered.toFixed(1),
     gap: Math.max(0, +(target - current).toFixed(2)),
-    status: monthsCovered >= 6 ? "ok" : monthsCovered >= 3 ? "warn" : "danger"
+    status: monthsCovered >= 6 ? "ok" : monthsCovered >= 3 ? "warn" : "danger",
+    breakdown: {
+      contas: +liquidAccounts.toFixed(2),
+      investimentos_liquidos: +liquidInvestments.toFixed(2)
+    }
   };
 }
 
