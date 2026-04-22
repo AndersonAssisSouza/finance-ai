@@ -899,7 +899,12 @@ function renderInvestments() {
           h("td", {}, fmt(i.current_price)),
           h("td", {}, fmt(pos)),
           h("td", { class: p >= 0 ? "amt pos" : "amt neg" }, `${p.toFixed(1)}%`),
-          h("td", {}, h("button", { class: "btn btn-ghost btn-icon", onClick: () => { if (confirm("Excluir?")) { Store.deleteInvestment(i.id); navigate(); } } }, "✕"))
+          h("td", { style: "white-space:nowrap" },
+            h("button", { class: "btn btn-ghost btn-icon", title: "Editar",
+              onClick: () => openInvestmentModal(i) }, "⚙️"),
+            h("button", { class: "btn btn-ghost btn-icon", title: "Excluir",
+              onClick: () => { if (confirm("Excluir?")) { Store.deleteInvestment(i.id); navigate(); } }
+            }, "✕"))
         );
       }))
     )
@@ -2022,34 +2027,51 @@ function openDebtModal() {
   }]);
 }
 
-function openInvestmentModal() {
+function openInvestmentModal(existing) {
+  const s = existing || { name: "", ticker: "", type: "renda_fixa", quantity: 1, avg_price: "", current_price: "" };
+  const typeOpt = (val, label) =>
+    h("option", { value: val, selected: s.type === val }, label);
+
   const body = h("div", {},
     h("div", { class: "field-row" },
-      h("label", { class: "field" }, h("span", { class: "lbl" }, "Nome"), h("input", { id: "in-name", class: "input" })),
-      h("label", { class: "field" }, h("span", { class: "lbl" }, "Ticker"), h("input", { id: "in-ticker", class: "input" }))
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Nome"),
+        h("input", { id: "in-name", class: "input", value: s.name })),
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Ticker"),
+        h("input", { id: "in-ticker", class: "input", value: s.ticker || "" }))
     ),
     h("label", { class: "field" }, h("span", { class: "lbl" }, "Tipo"),
       h("select", { id: "in-type", class: "select" },
-        h("option", { value: "renda_fixa" }, "Renda fixa"),
-        h("option", { value: "acoes" }, "Ações"),
-        h("option", { value: "fii" }, "FII"),
-        h("option", { value: "etf" }, "ETF"),
-        h("option", { value: "cripto" }, "Cripto")
+        typeOpt("renda_fixa", "Renda fixa"),
+        typeOpt("acoes", "Ações"),
+        typeOpt("fii", "FII"),
+        typeOpt("etf", "ETF"),
+        typeOpt("cripto", "Cripto")
       )
     ),
     h("div", { class: "field-row" },
-      h("label", { class: "field" }, h("span", { class: "lbl" }, "Quantidade"), h("input", { id: "in-qty", class: "input", type: "number", step: ".0001" })),
-      h("label", { class: "field" }, h("span", { class: "lbl" }, "Preço médio"), h("input", { id: "in-avg", class: "input", type: "text", inputmode: "decimal", step: ".01" }))
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Quantidade"),
+        h("input", { id: "in-qty", class: "input", type: "number", step: ".0001", value: s.quantity })),
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Preço médio / Total aportado"),
+        h("input", { id: "in-avg", class: "input", type: "text", inputmode: "decimal", value: s.avg_price }))
     ),
-    h("label", { class: "field" }, h("span", { class: "lbl" }, "Preço atual"),
-      h("input", { id: "in-cur", class: "input", type: "text", inputmode: "decimal", step: ".01" }))
+    h("label", { class: "field" }, h("span", { class: "lbl" }, "Preço atual / Saldo"),
+      h("input", { id: "in-cur", class: "input", type: "text", inputmode: "decimal", value: s.current_price }))
   );
-  openModal("+ Novo investimento", body, [{
+  const title = existing ? "Editar investimento" : "+ Novo investimento";
+  openModal(title, body, [{
     label: "Salvar", class: "btn-gradient", onClick: () => {
-      Store.addInvestment({
-        name: $("#in-name").value, ticker: $("#in-ticker").value, type: $("#in-type").value,
-        quantity: num($("#in-qty").value), avg_price: num($("#in-avg").value), current_price: num($("#in-cur").value)
-      });
+      const data = {
+        name: $("#in-name").value.trim(),
+        ticker: $("#in-ticker").value.trim(),
+        type: $("#in-type").value,
+        quantity: num($("#in-qty").value) || 1,
+        avg_price: num($("#in-avg").value),
+        current_price: num($("#in-cur").value)
+      };
+      if (!data.name) return alert("⚠️ Informe o nome");
+      if (!data.current_price) return alert("⚠️ Informe o preço atual / saldo");
+      if (existing) Store.updateInvestment(existing.id, data);
+      else Store.addInvestment(data);
       closeModal(); navigate();
     }
   }]);
