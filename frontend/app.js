@@ -216,8 +216,18 @@ function enterApp() {
   $("#auth").classList.add("hidden");
   $("#app").classList.add("active");
   renderSidebar();
-  if (!location.hash) location.hash = "#/dashboard";
-  else navigate();
+  // Sempre abre no Dashboard ao carregar o app (em vez de restaurar URL anterior)
+  // Exceção: se tiver ?join= pra pareamento de workspace, deixa passar
+  const hasJoin = new URLSearchParams(location.search).has("join");
+  if (!hasJoin) {
+    if (location.hash !== "#/dashboard") {
+      location.hash = "#/dashboard";
+    } else {
+      navigate();
+    }
+  } else {
+    navigate();
+  }
 }
 
 function renderSidebar() {
