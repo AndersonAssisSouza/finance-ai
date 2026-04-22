@@ -3,6 +3,12 @@
  */
 
 const fmt = v => (v ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+/* fmtNum(v): formata numero no padrao BR SEM prefixo R$ — usado para pre-popular inputs de moeda */
+const fmtNum = v => {
+  const n = +v;
+  if (!isFinite(n) || n === 0) return v === 0 || v === "0" ? "0,00" : "";
+  return n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
 /* Parser de valor BR: aceita "65215,79", "65.215,79", "R$ 65.215,79", "65215.79" */
 const num = v => {
   if (typeof v === "number") return v;
@@ -18,6 +24,28 @@ const num = v => {
   const n = parseFloat(s);
   return isNaN(n) ? 0 : n;
 };
+/* Cria um <input> de moeda no padrao brasileiro (R$ 1.234,56).
+ * Uso: h("label", {...}, moneyInput("id-do-campo", valorInicial, "0,00"))
+ * Leitura do valor: num($("#id-do-campo").value) */
+function moneyInput(id, value, placeholder = "0,00") {
+  const displayValue = (value === "" || value === null || value === undefined)
+    ? ""
+    : fmtNum(typeof value === "number" ? value : num(value));
+  const inp = h("input", {
+    id,
+    class: "input",
+    type: "text",
+    inputmode: "decimal",
+    placeholder,
+    value: displayValue
+  });
+  // Reformata ao sair do campo
+  inp.addEventListener("blur", () => {
+    const n = num(inp.value);
+    inp.value = n === 0 && inp.value.trim() === "" ? "" : fmtNum(n);
+  });
+  return inp;
+}
 const fmtShort = v => {
   const n = +v || 0;
   if (Math.abs(n) >= 1e6) return (n/1e6).toFixed(1) + "M";
@@ -821,9 +849,14 @@ function renderDebts() {
   }
 
   const totalBalance = debts.reduce((s,d) => s + d.balance, 0);
+  const totalOriginal = debts.reduce((s,d) => s + (d.total_amount || d.balance), 0);
+  const totalPago = Math.max(0, totalOriginal - totalBalance);
   const strat = AI.debtStrategy(Store);
-  wrap.append(h("div", { class: "grid grid-3 mb-3" },
-    kpiCard("Total devido", fmt(totalBalance)),
+  wrap.append(h("div", { class: "grid grid-4 mb-3" },
+    kpiCard("Valor total das dívidas", fmt(totalOriginal),
+      h("div", { class: "delta" }, "Somado dos contratos")),
+    kpiCard("Saldo devedor hoje", fmt(totalBalance),
+      h("div", { class: `delta ${totalPago > 0 ? "pos" : ""}` }, totalPago > 0 ? `Já quitado ${fmt(totalPago)}` : "")),
     kpiCard("Estratégia recomendada", strat?.recommended === "avalanche" ? "Avalanche" : "Snowball",
       h("div", { class: "delta" }, strat ? `Economiza ${fmt(strat.savings)} em juros` : "")),
     kpiCard("Quitação", strat ? `${Math.ceil(strat[strat.recommended].months / 12)} anos` : "—",
@@ -832,17 +865,30 @@ function renderDebts() {
 
   const card = h("div", { class: "card" });
   for (const d of debts) {
-    const paid = d.installments_total ? (d.installments_paid / d.installments_total) * 100 : 0;
+    const total = d.total_amount || d.balance;
+    const pago = Math.max(0, total - d.balance);
+    const paidPctMoney = total > 0 ? (pago / total) * 100 : 0;
+    const paidPctInst = d.installments_total ? (d.installments_paid / d.installments_total) * 100 : 0;
+    const pctShown = d.installments_total ? paidPctInst : paidPctMoney;
     card.append(h("div", { class: "list-item", style: "flex-direction:column; align-items:stretch" },
       h("div", { class: "flex items-center gap-3" },
         h("div", { class: "avatar", style: "background:rgba(239,68,68,.15); color:var(--danger)" }, "📉"),
         h("div", { class: "grow" },
           h("div", { class: "title" }, d.name),
-          h("div", { class: "sub" }, `Saldo ${fmt(d.balance)} • Juros ${d.interest_rate}% a.m. ${d.installments_total ? `• ${d.installments_paid}/${d.installments_total} parcelas` : ""}`)
+          h("div", { class: "sub" },
+            `Total ${fmt(total)} • Saldo ${fmt(d.balance)} • Juros ${d.interest_rate}% a.m.` +
+            (d.installments_total ? ` • ${d.installments_paid}/${d.installments_total} parcelas` : "") +
+            (d.due_day ? ` • Vence dia ${d.due_day}` : "")
+          )
         ),
-        h("button", { class: "btn btn-ghost btn-icon", onClick: () => { if (confirm("Excluir?")) { Store.deleteDebt(d.id); navigate(); }} }, "✕")
+        h("button", { class: "btn btn-ghost btn-icon", title: "Editar",
+          onClick: () => openDebtModal(d) }, "⚙️"),
+        h("button", { class: "btn btn-ghost btn-icon", title: "Excluir",
+          onClick: () => { if (confirm("Excluir?")) { Store.deleteDebt(d.id); navigate(); }} }, "✕")
       ),
-      d.installments_total && h("div", { class: "progress mt-2" }, h("div", { style: `width:${paid}%` }))
+      h("div", { class: "progress mt-2" }, h("div", { style: `width:${Math.min(100, pctShown)}%` })),
+      h("div", { class: "text-xs text-muted mt-1" },
+        `${pctShown.toFixed(1)}% quitado` + (pago > 0 ? ` • Já pago ${fmt(pago)}` : ""))
     ));
   }
   wrap.append(card);
@@ -1890,8 +1936,8 @@ function openNewTx() {
     h("label", { class: "field" }, h("span", { class: "lbl" }, "Descrição"),
       h("input", { id: "tx-desc", class: "input", placeholder: "Ex: Mercado" })),
     h("div", { class: "field-row" },
-      h("label", { class: "field" }, h("span", { class: "lbl" }, "Valor"),
-        h("input", { id: "tx-amt", class: "input", type: "text", inputmode: "decimal", step: ".01" })),
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Valor (R$)"),
+        moneyInput("tx-amt", "")),
       h("label", { class: "field" }, h("span", { class: "lbl" }, "Data"),
         h("input", { id: "tx-date", class: "input", type: "date", value: new Date().toISOString().slice(0,10) }))
     ),
@@ -1962,9 +2008,8 @@ function openAccountModal(existing) {
           ...FX.SUPPORTED.map(c => h("option", { value: c.code, selected: c.code === (s.currency || FX.userCurrency()) }, `${c.symbol}  ${c.code}`))))
     ),
     h("div", { class: "field-row" },
-      h("label", { class: "field" }, h("span", { class: "lbl" }, label),
-        h("input", { id: "ac-bal", class: "input", type: "text", inputmode: "decimal", step: ".01",
-          value: existing ? saldoHoje.toFixed(2).replace(".", ",") : "" })),
+      h("label", { class: "field" }, h("span", { class: "lbl" }, label + " (R$)"),
+        moneyInput("ac-bal", existing ? saldoHoje : "")),
       h("label", { class: "field" }, h("span", { class: "lbl" }, "Ícone"),
         h("input", { id: "ac-icon", class: "input", value: s.icon }))
     ),
@@ -2019,7 +2064,7 @@ function openCardModal(existing) {
   const s = existing || { name: "", limit: 1000, closing_day: 25, due_day: 5, color_start: "#6366f1", color_end: "#ec4899", icon: "💳" };
   const body = h("div", {},
     h("label", { class: "field" }, h("span", { class: "lbl" }, "Nome"), h("input", { id: "ca-name", class: "input", value: s.name })),
-    h("label", { class: "field" }, h("span", { class: "lbl" }, "Limite"), h("input", { id: "ca-lim", class: "input", type: "number", value: s.limit })),
+    h("label", { class: "field" }, h("span", { class: "lbl" }, "Limite (R$)"), moneyInput("ca-lim", s.limit)),
     h("div", { class: "field-row" },
       h("label", { class: "field" }, h("span", { class: "lbl" }, "Fechamento (dia)"), h("input", { id: "ca-close", class: "input", type: "number", min: 1, max: 31, value: s.closing_day })),
       h("label", { class: "field" }, h("span", { class: "lbl" }, "Vencimento (dia)"), h("input", { id: "ca-due", class: "input", type: "number", min: 1, max: 31, value: s.due_day }))
@@ -2050,8 +2095,8 @@ function openBudgetModal() {
       h("input", { id: "bu-month", class: "input", type: "month", value: App.currentMonth })),
     h("label", { class: "field" }, h("span", { class: "lbl" }, "Categoria"),
       selectCategory("", null, "bu-cat")),
-    h("label", { class: "field" }, h("span", { class: "lbl" }, "Valor planejado"),
-      h("input", { id: "bu-amt", class: "input", type: "text", inputmode: "decimal", step: ".01" }))
+    h("label", { class: "field" }, h("span", { class: "lbl" }, "Valor planejado (R$)"),
+      moneyInput("bu-amt", ""))
   );
   openModal("Definir orçamento", body, [{
     label: "Salvar", class: "btn-gradient", onClick: () => {
@@ -2069,11 +2114,11 @@ function openGoalModal(existing) {
   const body = h("div", {},
     h("label", { class: "field" }, h("span", { class: "lbl" }, "Nome"), h("input", { id: "go-name", class: "input", value: s.name })),
     h("div", { class: "field-row" },
-      h("label", { class: "field" }, h("span", { class: "lbl" }, "Alvo (R$)"), h("input", { id: "go-target", class: "input", type: "number", value: s.target_amount })),
-      h("label", { class: "field" }, h("span", { class: "lbl" }, "Atual (R$)"), h("input", { id: "go-current", class: "input", type: "number", value: s.current_amount }))
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Alvo (R$)"), moneyInput("go-target", s.target_amount)),
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Atual (R$)"), moneyInput("go-current", s.current_amount))
     ),
     h("div", { class: "field-row" },
-      h("label", { class: "field" }, h("span", { class: "lbl" }, "Aporte mensal"), h("input", { id: "go-monthly", class: "input", type: "number", value: s.monthly_contribution })),
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Aporte mensal (R$)"), moneyInput("go-monthly", s.monthly_contribution)),
       h("label", { class: "field" }, h("span", { class: "lbl" }, "Ícone"), h("input", { id: "go-icon", class: "input", value: s.icon }))
     )
   );
@@ -2091,25 +2136,51 @@ function openGoalModal(existing) {
   }]);
 }
 
-function openDebtModal() {
+function openDebtModal(existing) {
+  const d = existing || {
+    name: "", total_amount: "", balance: "", interest_rate: 1,
+    installments_total: "", installments_paid: 0, due_day: 10
+  };
   const body = h("div", {},
-    h("label", { class: "field" }, h("span", { class: "lbl" }, "Nome"), h("input", { id: "de-name", class: "input" })),
+    h("label", { class: "field" }, h("span", { class: "lbl" }, "Nome"),
+      h("input", { id: "de-name", class: "input", value: d.name })),
     h("div", { class: "field-row" },
-      h("label", { class: "field" }, h("span", { class: "lbl" }, "Valor total"), h("input", { id: "de-total", class: "input", type: "number" })),
-      h("label", { class: "field" }, h("span", { class: "lbl" }, "Saldo atual"), h("input", { id: "de-bal", class: "input", type: "number" }))
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Valor total (R$)"),
+        moneyInput("de-total", d.total_amount)),
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Saldo atual (R$)"),
+        moneyInput("de-bal", d.balance))
     ),
     h("div", { class: "field-row" },
-      h("label", { class: "field" }, h("span", { class: "lbl" }, "Juros mensal (%)"), h("input", { id: "de-rate", class: "input", type: "text", inputmode: "decimal", step: ".01", value: 1 })),
-      h("label", { class: "field" }, h("span", { class: "lbl" }, "Parcelas total"), h("input", { id: "de-total-inst", class: "input", type: "number" }))
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Juros mensal (%)"),
+        h("input", { id: "de-rate", class: "input", type: "text", inputmode: "decimal", value: d.interest_rate })),
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Dia do vencimento"),
+        h("input", { id: "de-due", class: "input", type: "number", min: 1, max: 31, value: d.due_day || 10 }))
+    ),
+    h("div", { class: "field-row" },
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Parcelas total"),
+        h("input", { id: "de-total-inst", class: "input", type: "number", value: d.installments_total || "" })),
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Parcelas pagas"),
+        h("input", { id: "de-paid-inst", class: "input", type: "number", value: d.installments_paid || 0 }))
     )
   );
-  openModal("+ Nova dívida", body, [{
+  const title = existing ? "Editar dívida" : "+ Nova dívida";
+  openModal(title, body, [{
     label: "Salvar", class: "btn-gradient", onClick: () => {
-      Store.addDebt({
-        name: $("#de-name").value, total_amount: num($("#de-total").value),
-        balance: num($("#de-bal").value), interest_rate: num($("#de-rate").value),
-        installments_total: num($("#de-total-inst").value) || null
-      });
+      const name = $("#de-name").value.trim();
+      if (!name) return alert("⚠️ Informe o nome");
+      const data = {
+        name,
+        total_amount: num($("#de-total").value),
+        balance: num($("#de-bal").value),
+        interest_rate: num($("#de-rate").value),
+        installments_total: +$("#de-total-inst").value || null,
+        installments_paid: +$("#de-paid-inst").value || 0,
+        due_day: +$("#de-due").value || 10
+      };
+      if (!data.balance) return alert("⚠️ Informe o saldo atual");
+      if (!data.total_amount) data.total_amount = data.balance;
+      if (existing) Store.updateDebt(existing.id, data);
+      else Store.addDebt(data);
       closeModal(); navigate();
     }
   }]);
@@ -2140,11 +2211,11 @@ function openInvestmentModal(existing) {
     h("div", { class: "field-row" },
       h("label", { class: "field" }, h("span", { class: "lbl" }, "Quantidade"),
         h("input", { id: "in-qty", class: "input", type: "number", step: ".0001", value: s.quantity })),
-      h("label", { class: "field" }, h("span", { class: "lbl" }, "Preço médio / Total aportado"),
-        h("input", { id: "in-avg", class: "input", type: "text", inputmode: "decimal", value: s.avg_price }))
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Preço médio / Total aportado (R$)"),
+        moneyInput("in-avg", s.avg_price))
     ),
-    h("label", { class: "field" }, h("span", { class: "lbl" }, "Preço atual / Saldo"),
-      h("input", { id: "in-cur", class: "input", type: "text", inputmode: "decimal", value: s.current_price })),
+    h("label", { class: "field" }, h("span", { class: "lbl" }, "Preço atual / Saldo (R$)"),
+      moneyInput("in-cur", s.current_price)),
     h("label", { class: "field", style: "flex-direction:row;align-items:flex-start;gap:8px;padding:10px;background:rgba(99,102,241,.06);border:1px solid var(--border);border-radius:8px;margin-top:8px" },
       h("input", { id: "in-liquid", type: "checkbox", style: "margin-top:3px", checked: s.is_liquid === true }),
       h("div", {},
@@ -3730,8 +3801,8 @@ function openRecurrenceModal(existing) {
     h("label", { class: "field" }, h("span", { class: "lbl" }, "Descrição"),
       h("input", { id: "rc-desc", class: "input", value: t.description || "" })),
     h("div", { class: "field-row" },
-      h("label", { class: "field" }, h("span", { class: "lbl" }, "Valor (negativo = despesa)"),
-        h("input", { id: "rc-amt", class: "input", type: "text", inputmode: "decimal", step: ".01", value: t.amount || "" })),
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Valor (R$ — negativo = despesa)"),
+        moneyInput("rc-amt", t.amount || "")),
       h("label", { class: "field" }, h("span", { class: "lbl" }, "Categoria"),
         selectCategory(t.category_id || "", null, "rc-cat"))
     ),
