@@ -6,8 +6,8 @@
 <meta name="theme-color" content="#6366f1">
 <title>Finance AI — Controle financeiro inteligente</title>
 <meta name="description" content="Sistema completo de gestão financeira pessoal com IA, conciliação bancária Pluggy, orçamentos, metas, investimentos e simulador FIRE.">
-<meta name="app-version" content="3.9.7">
-<link rel="manifest" href="./manifest.json?v=397">
+<meta name="app-version" content="3.9.8">
+<link rel="manifest" href="./manifest.json?v=398">
 <link rel="icon" type="image/svg+xml" href="./icon.svg">
 <link rel="apple-touch-icon" href="./icon.svg">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -25,8 +25,31 @@
 <script>
 /* === Cache-busting: força limpeza se versão antiga detectada === */
 (async () => {
-  const V = "3.9.7";
+  const V = "3.9.8";
   const prev = localStorage.getItem("fa_app_version");
+
+  /* Migração v3.9.8: invalida credenciais Pluggy antigas (expostas em chat).
+   * Roda uma única vez por navegador. O usuário deve rotacionar no dashboard.pluggy.ai
+   * e colar as novas ao tentar conectar. */
+  if (!localStorage.getItem("fa_migr_pluggy_rotate_v398")) {
+    const hadCreds = !!(localStorage.getItem("fa_pluggy_client_id") || localStorage.getItem("fa_pluggy_client_secret"));
+    localStorage.removeItem("fa_pluggy_client_id");
+    localStorage.removeItem("fa_pluggy_client_secret");
+    localStorage.removeItem("fa_pluggy_api_key");
+    localStorage.removeItem("fa_pluggy_api_key_exp");
+    localStorage.removeItem("fa_pluggy_last_item");
+    localStorage.setItem("fa_migr_pluggy_rotate_v398", "1");
+    if (hadCreds) {
+      // Avisa apenas se realmente havia credenciais aqui
+      setTimeout(() => alert(
+        "🔐 Segurança: credenciais Pluggy antigas foram removidas deste navegador.\n\n" +
+        "Motivo: as credenciais anteriores foram expostas e devem ser rotacionadas.\n\n" +
+        "Vá em https://dashboard.pluggy.ai/applications → Revoke + Create new secret, " +
+        "e cole as novas na próxima vez que usar Conciliação."
+      ), 2000);
+    }
+  }
+
   if (prev && prev !== V) {
     // Versão antiga — limpa tudo e recarrega
     try {
@@ -46,7 +69,7 @@
   localStorage.setItem("fa_app_version", V);
 })();
 </script>
-<link rel="stylesheet" href="./styles.css?v=397">
+<link rel="stylesheet" href="./styles.css?v=398">
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
 <script src="https://cdn.pluggy.ai/pluggy-connect/v2.9.2/pluggy-connect.js"></script>
@@ -110,18 +133,18 @@
 <!-- Search modal -->
 <div id="search-modal" class="hidden"></div>
 
-<script src="./storage.js?v=397"></script>
-<script src="./fx.js?v=397"></script>
-<script src="./ai_engine.js?v=397"></script>
-<script src="./llm.js?v=397"></script>
-<script src="./automations.js?v=397"></script>
-<script src="./irpf_calc.js?v=397"></script>
-<script src="./csv_parser.js?v=397"></script>
-<script src="./bot.js?v=397"></script>
-<script src="./notifications.js?v=397"></script>
-<script src="./cloud_sync.js?v=397"></script>
-<script src="./market_monitor.js?v=397"></script>
-<script src="./app.js?v=397"></script>
+<script src="./storage.js?v=398"></script>
+<script src="./fx.js?v=398"></script>
+<script src="./ai_engine.js?v=398"></script>
+<script src="./llm.js?v=398"></script>
+<script src="./automations.js?v=398"></script>
+<script src="./irpf_calc.js?v=398"></script>
+<script src="./csv_parser.js?v=398"></script>
+<script src="./bot.js?v=398"></script>
+<script src="./notifications.js?v=398"></script>
+<script src="./cloud_sync.js?v=398"></script>
+<script src="./market_monitor.js?v=398"></script>
+<script src="./app.js?v=398"></script>
 <script>
 // PWA registration
 if ('serviceWorker' in navigator) {
