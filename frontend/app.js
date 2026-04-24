@@ -1238,6 +1238,10 @@ function renderReconcile() {
         h("div", { class: "flex gap-2", style: "flex-wrap:wrap" },
           h("button", { class: "btn btn-gradient text-xs", onClick: () => openPluggyDirect(false) }, "Conectar banco"),
           h("button", { class: "btn btn-outline text-xs", onClick: () => openPluggyDirect(true), title: "Pluggy Bank — funciona em conta trial" }, "🧪 Sandbox"),
+          h("button", { class: "btn btn-outline text-xs",
+            title: "Inserir ou rotacionar Client ID/Secret do Pluggy",
+            onClick: () => openPluggyCredsModal().then(() => navigate()).catch(() => {}) },
+            hasPluggyCreds ? "🔑 Trocar creds" : "🔑 Configurar"),
           hasPluggyCreds && h("button", { class: "btn btn-ghost text-xs", title: "Limpar credenciais do browser", onClick: () => {
             if (!confirm("Remover credenciais Pluggy deste navegador?")) return;
             localStorage.removeItem("fa_pluggy_client_id");
@@ -1486,6 +1490,94 @@ function openPluggyPaste() {
   ]);
 }
 /* ============ Pluggy DIRETO (sem backend) — credenciais no localStorage ============ */
+/* Modal amigavel para entrada e validacao ao vivo das credenciais. */
+function openPluggyCredsModal() {
+  return new Promise((resolve, reject) => {
+    const status = h("div", { id: "pl-status", class: "text-xs text-muted mt-2" },
+      "Cole Client ID e Client Secret e clique em \"Validar e salvar\".");
+    const idInput = h("input", {
+      id: "pl-id", class: "input", type: "text", spellcheck: "false", autocomplete: "off",
+      placeholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+      value: localStorage.getItem("fa_pluggy_client_id") || ""
+    });
+    const secInput = h("input", {
+      id: "pl-sec", class: "input", type: "password", spellcheck: "false", autocomplete: "off",
+      placeholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+    });
+    const showToggle = h("label", { class: "text-xs", style: "display:flex;align-items:center;gap:6px;margin-top:4px" },
+      h("input", { type: "checkbox", onChange: e => { secInput.type = e.target.checked ? "text" : "password"; }}),
+      h("span", {}, "Mostrar secret")
+    );
+
+    const body = h("div", {},
+      h("div", { class: "text-xs", style: "background:rgba(245,158,11,.08); border-left:3px solid var(--warn,#f59e0b); padding:10px; border-radius:6px; margin-bottom:12px" },
+        h("b", {}, "Precisa rotacionar? "),
+        "Vá em ",
+        h("a", { href: "https://dashboard.pluggy.ai/applications", target: "_blank", rel: "noopener", class: "link" },
+          "dashboard.pluggy.ai/applications"),
+        " → sua aplicação → Revoke → Create new secret. As credenciais ficam apenas neste navegador."
+      ),
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Client ID"), idInput),
+      h("label", { class: "field" }, h("span", { class: "lbl" }, "Client Secret"), secInput, showToggle),
+      status
+    );
+
+    let closed = false;
+    const cleanup = () => { closed = true; };
+
+    openModal("Credenciais Pluggy", body, [
+      {
+        label: "Validar e salvar",
+        class: "btn-gradient",
+        onClick: async () => {
+          const cid = idInput.value.trim();
+          const csec = secInput.value.trim();
+          if (!cid || !csec) {
+            status.textContent = "⚠️ Preencha os dois campos.";
+            status.className = "text-xs mt-2";
+            status.style.color = "var(--danger, #ef4444)";
+            return;
+          }
+          status.textContent = "⏳ Validando com api.pluggy.ai/auth ...";
+          status.style.color = "";
+          try {
+            const r = await fetch("https://api.pluggy.ai/auth", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ clientId: cid, clientSecret: csec })
+            });
+            if (!r.ok) {
+              const txt = await r.text().catch(() => "");
+              status.innerHTML = "❌ Credenciais inválidas. " +
+                (r.status === 403 ? "Verifique se Revoked/Expired no dashboard." : `HTTP ${r.status}`) +
+                (txt ? `<br><span class='text-muted'>${txt.slice(0,200)}</span>` : "");
+              status.style.color = "var(--danger, #ef4444)";
+              return;
+            }
+            const { apiKey } = await r.json();
+            localStorage.setItem("fa_pluggy_client_id", cid);
+            localStorage.setItem("fa_pluggy_client_secret", csec);
+            localStorage.setItem("fa_pluggy_api_key", apiKey);
+            localStorage.setItem("fa_pluggy_api_key_exp", String(Date.now() + 90 * 60 * 1000));
+            status.textContent = "✅ Validado e salvo neste navegador.";
+            status.style.color = "var(--success, #10b981)";
+            cleanup();
+            setTimeout(() => { closeModal(); resolve(apiKey); }, 500);
+          } catch (e) {
+            status.textContent = "❌ Erro de rede: " + (e.message || e);
+            status.style.color = "var(--danger, #ef4444)";
+          }
+        }
+      },
+      {
+        label: "Cancelar",
+        class: "btn-outline",
+        onClick: () => { cleanup(); closeModal(); reject(new Error("Cancelado pelo usuário")); }
+      }
+    ]);
+  });
+}
+
 async function pluggyGetApiKey() {
   // Cache de 90min (token expira em 2h)
   const cached = localStorage.getItem("fa_pluggy_api_key");
@@ -1495,12 +1587,8 @@ async function pluggyGetApiKey() {
   let clientId = localStorage.getItem("fa_pluggy_client_id");
   let clientSecret = localStorage.getItem("fa_pluggy_client_secret");
   if (!clientId || !clientSecret) {
-    clientId = prompt("Cole seu Pluggy Client ID:\n(obtenha em dashboard.pluggy.ai/applications)");
-    if (!clientId) throw new Error("Client ID obrigatório");
-    clientSecret = prompt("Cole seu Pluggy Client Secret:\n(fica salvo só no seu navegador)");
-    if (!clientSecret) throw new Error("Client Secret obrigatório");
-    localStorage.setItem("fa_pluggy_client_id", clientId.trim());
-    localStorage.setItem("fa_pluggy_client_secret", clientSecret.trim());
+    // Abre modal unico de credenciais com validacao ao vivo
+    return await openPluggyCredsModal();
   }
 
   const r = await fetch("https://api.pluggy.ai/auth", {
@@ -1510,10 +1598,11 @@ async function pluggyGetApiKey() {
   });
   if (!r.ok) {
     const txt = await r.text().catch(() => "");
-    // Credenciais inválidas — limpa cache
+    // Credenciais invalidas — limpa cache e pede de novo via modal
     localStorage.removeItem("fa_pluggy_client_id");
     localStorage.removeItem("fa_pluggy_client_secret");
-    throw new Error("Auth Pluggy falhou: " + (txt || r.status));
+    alert("As credenciais Pluggy salvas estão inválidas (" + (r.status) + ").\n\nProvavelmente foram revogadas no dashboard. Vou abrir o formulário para você colar as novas.");
+    return await openPluggyCredsModal();
   }
   const { apiKey } = await r.json();
   localStorage.setItem("fa_pluggy_api_key", apiKey);
