@@ -103,7 +103,7 @@ def main() -> int:
         print(f"     codeDescription={code_desc} message={data.get('message', '')[:200]}")
 
     print()
-    print("Resumo: credenciais validas. Uso no frontend via Conciliacao > 🔑 Configurar.")
+    print("Resumo: credenciais validas. Uso no frontend via Conciliacao > Configurar.")
     return 0
 
 
