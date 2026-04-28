@@ -328,14 +328,26 @@ function reconcile(existing, incoming) {
     const match = existing.find(ex => ex.external_id && inc.external_id && ex.external_id === inc.external_id)
                || existing.find(ex => isDuplicate(inc, ex));
     if (match) out.duplicates.push({ incoming: inc, existing: match });
-    else out.new.push({ ...inc, suggested_category: suggestCategory(inc.description) });
+    else out.new.push({ ...inc, suggested_category: suggestCategory(inc) });
   }
   return out;
 }
 
-function suggestCategory(description) {
+function suggestCategory(input) {
+  // Aceita string (legado) ou objeto transação (com merchant_label, description, etc.)
+  // Quando recebe objeto: prioriza merchant_label > description, e usa merchant_category/pluggy_category
+  // como sinal extra antes de cair nas regras de regex.
+  let description, merchantCategory, pluggyCategory;
+  if (typeof input === "string" || input == null) {
+    description = input || "";
+    merchantCategory = pluggyCategory = null;
+  } else {
+    description = input.merchant_label || input.description || "";
+    merchantCategory = input.merchant_category || null;
+    pluggyCategory = input.pluggy_category || null;
+  }
   // Remove prefixo "COMPRA CARTAO - No estabelecimento" para melhor match
-  const clean = (description || "")
+  const clean = description
     .replace(/^compra cart[aã]o\s*-\s*no estabelecimento\s*/i, "")
     .replace(/^compra\s*-\s*/i, "")
     .replace(/\s+\d+\/\d+\s*$/, "") // remove " - 1/3"
@@ -423,6 +435,37 @@ function suggestCategory(description) {
       // Defensivo: só retorna se a categoria existir no Store do usuário
       if (typeof Store !== "undefined" && Store.categoryById && !Store.categoryById(c)) continue;
       return c;
+    }
+  }
+  // Fallback usando metadados enriquecidos da Pluggy (quando descrição não casou)
+  const PLUGGY_CAT_MAP = {
+    "Public services": "cat_utilities",
+    "Utilities": "cat_utilities",
+    "Telecommunications": "cat_internet",
+    "Telecom": "cat_internet",
+    "Supermarkets": "cat_grocery",
+    "Restaurants": "cat_restaurant",
+    "Food delivery": "cat_delivery",
+    "Pharmacies": "cat_pharmacy",
+    "Health": "cat_health",
+    "Transportation": "cat_rideshare",
+    "Fuel": "cat_fuel",
+    "Education": "cat_education",
+    "Entertainment": "cat_entertainment",
+    "Shopping": "cat_shopping",
+    "Clothing": "cat_clothing",
+    "Streaming": "cat_streaming",
+    "Travel": "cat_travel",
+    "Income": "cat_other_in",
+    "Salary": "cat_salary",
+    "Taxes": "cat_taxes",
+    "Transfer": "cat_transfer"
+  };
+  const meta = pluggyCategory || merchantCategory;
+  if (meta) {
+    const mapped = PLUGGY_CAT_MAP[meta];
+    if (mapped && (typeof Store === "undefined" || !Store.categoryById || Store.categoryById(mapped))) {
+      return mapped;
     }
   }
   return null;

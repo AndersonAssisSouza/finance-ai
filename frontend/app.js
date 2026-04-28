@@ -3,6 +3,10 @@
  */
 
 const fmt = v => (v ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+/* Label preferido pra exibição: nome do beneficiário enriquecido > descrição crua. */
+const displayLabel = t => ((t?.merchant_label || t?.description || "").toString().trim());
+/* Verdadeiro quando a descrição crua é diferente do label (= vale mostrar como sub-linha). */
+const hasDistinctRawDesc = t => t?.merchant_label && t?.description && t.merchant_label !== t.description;
 /* fmtNum(v): formata numero no padrao BR SEM prefixo R$ — usado para pre-popular inputs de moeda */
 const fmtNum = v => {
   const n = +v;
@@ -502,7 +506,8 @@ function renderTxList(txs) {
     return h("div", { class: "list-item" },
       h("div", { class: "avatar", style: `background:${cat?.color || "#64748b"}20; color:${cat?.color || "#64748b"}` }, cat?.icon || "📎"),
       h("div", { class: "grow" },
-        h("div", { class: "title" }, t.description),
+        h("div", { class: "title" }, displayLabel(t)),
+        hasDistinctRawDesc(t) && h("div", { class: "sub", style: "opacity:.55; font-family:ui-monospace,monospace; font-size:11px" }, t.description),
         h("div", { class: "sub" },
           `${t.date} • ${cat?.name || "—"}`,
           acc && ` • ${acc.icon} ${acc.name}`,
@@ -1290,7 +1295,7 @@ function renderReconcile() {
   const viewList = uncat.length ? uncat : explicitOther;
   if (uncat.length || explicitOther.length) {
     const suggestedCount = viewList.filter(t => {
-      const s = AI.suggestCategory(t.description);
+      const s = AI.suggestCategory(t);
       return s && s !== t.category_id;
     }).length;
     const emptyDescCount = viewList.filter(t => isEmptyDesc(t.description)).length;
@@ -1336,7 +1341,7 @@ function renderReconcile() {
             if (!confirm(`Aplicar categorização automática da IA em ${suggestedCount} transações?`)) return;
             let applied = 0;
             for (const t of viewList) {
-              const sug = AI.suggestCategory(t.description);
+              const sug = AI.suggestCategory(t);
               if (sug && sug !== t.category_id) { Store.updateTransaction(t.id, { category_id: sug }); applied++; }
             }
             alert(`✅ ${applied} transações categorizadas automaticamente`);
@@ -1348,14 +1353,16 @@ function renderReconcile() {
         `⚠️ ${emptyDescCount} transações sem descrição — clique no campo tracejado para preencher manualmente, ou use o botão ✏️ acima para preencher todas de uma vez.`),
       h("div", { class: "text-xs text-muted mt-2 mb-2" }, "Mostrando as 50 primeiras. Use o botão acima para aplicar a categorização em massa."),
       h("div", { class: "list scroll-y", style: "max-height:400px" }, ...(uncat.length ? uncat : explicitOther).slice(0, 50).map(t => {
-        const suggestion = AI.suggestCategory(t.description);
+        const suggestion = AI.suggestCategory(t);
         // Só considera sugestão se for DIFERENTE da categoria atual (evita "Aplicar Outros" em tx já em Outros)
         const suggestCat = (suggestion && suggestion !== t.category_id) ? Store.categoryById(suggestion) : null;
         const desc = (t.description || "").trim();
         // Considera descrição vazia também quando é só separadores/traços/pontos
         const emptyDesc = !desc || /^[-._\s·•–—]+$/.test(desc);
+        const opaqueAuto = !t.merchant_label && isOpaqueAutoDebit(desc);
+        const titleText = displayLabel(t);
         return h("div", { class: "list-item" },
-          h("div", { class: "avatar" }, emptyDesc ? "✏️" : "❓"),
+          h("div", { class: "avatar" }, emptyDesc ? "✏️" : (opaqueAuto ? "🔍" : "❓")),
           h("div", { class: "grow" },
             emptyDesc
               ? h("input", {
@@ -1368,9 +1375,14 @@ function renderReconcile() {
                   },
                   onKeyDown: (e) => { if (e.key === "Enter") e.target.blur(); }
                 })
-              : h("div", { class: "title" }, desc),
+              : h("div", { class: "title" }, titleText),
+            hasDistinctRawDesc(t) && h("div", { class: "sub", style: "opacity:.55; font-family:ui-monospace,monospace; font-size:11px" }, t.description),
             h("div", { class: "sub" }, `${t.date} • ${fmt(t.amount)}${t.type ? " • " + t.type : ""}`)
           ),
+          opaqueAuto && h("button", { class: "btn btn-outline text-xs",
+            title: "Rotular este débito automático e criar regra para identificar futuros",
+            onClick: () => openIdentifyAutoDebit(t)
+          }, "🔍 Identificar"),
           suggestCat && h("button", { class: "btn btn-outline text-xs",
             onClick: () => { Store.updateTransaction(t.id, { category_id: suggestCat.id }); navigate(); }
           }, `Aplicar ${suggestCat.icon} ${suggestCat.name}`),
@@ -1387,10 +1399,10 @@ function renderReconcile() {
 function runSanitizePipeline(uncatInitial) {
   const isEmptyDesc = d => { const s = (d || "").trim(); return !s || /^[-._\s·•–—]+$/.test(s); };
 
-  // ETAPA 1: categorização automática (usa AI.suggestCategory expandido)
+  // ETAPA 1: categorização automática (usa AI.suggestCategory expandido — passa tx inteira pra aproveitar merchant_label)
   let categorized = 0;
   for (const t of uncatInitial) {
-    const sug = AI.suggestCategory(t.description);
+    const sug = AI.suggestCategory(t);
     if (sug) { Store.updateTransaction(t.id, { category_id: sug }); categorized++; }
   }
 
@@ -1667,16 +1679,32 @@ async function openPluggyDirect(sandboxOnly = false) {
     const acc = localAccs[idx];
     if (!acc) return;
 
-    const incoming = allTx.map(t => ({
-      date: (t.date || "").slice(0, 10),
-      description: t.description || t.descriptionRaw || "",
-      amount: +t.amount,
-      external_id: t.id
-    }));
+    const incoming = allTx.map(t => {
+      const merchant = t.merchant || {};
+      const pd = t.paymentData || {};
+      // Pluggy frequentemente preenche merchant.name (varejo) ou paymentData.receiverName
+      // (débitos automáticos, transferências). Quando existem, valem mais que a descrição crua.
+      const merchantLabel = merchant.name || pd.receiverName || pd.payerName || null;
+      return {
+        date: (t.date || "").slice(0, 10),
+        description: t.description || t.descriptionRaw || "",
+        merchant_label: merchantLabel,
+        merchant_category: merchant.category || null,
+        receiver_document: pd.receiverDocument || null,
+        pluggy_category: t.category || null,
+        amount: +t.amount,
+        external_id: t.id
+      };
+    });
     const r = AI.reconcile(Store.data.transactions, incoming);
     for (const n of r.new) {
       Store.addTransaction({
         date: n.date, description: n.description, amount: n.amount,
+        merchant_label: n.merchant_label,
+        merchant_category: n.merchant_category,
+        receiver_document: n.receiver_document,
+        pluggy_category: n.pluggy_category,
+        external_id: n.external_id,
         account_id: acc.id, category_id: n.suggested_category,
         type: n.amount >= 0 ? "income" : "expense"
       });
@@ -2014,6 +2042,50 @@ function openModal(title, body, actions = []) {
   document.body.appendChild(bd);
 }
 function closeModal() { document.getElementById("modal-bd")?.remove(); }
+
+/* Modal pra identificar débito automático opaco e criar regra de categorização +
+ * relabel persistente (aplica retroativo em todas com o mesmo identificador, e
+ * vale como filtro pra futuras importações). */
+function openIdentifyAutoDebit(t) {
+  const contract = extractContractNumber(t.description);
+  const sameContractCount = contract
+    ? Store.data.transactions.filter(x => (x.description || "").includes(contract)).length
+    : 1;
+  const body = h("div", {},
+    h("div", { class: "text-xs text-muted mb-2" }, "Esta transação aparece como:"),
+    h("div", {
+      style: "font-family:ui-monospace,monospace; font-size:12px; padding:8px 10px; background:rgba(255,255,255,.05); border:1px solid var(--border,#444); border-radius:6px; margin-bottom:12px; word-break:break-all"
+    }, t.description),
+    contract && h("div", { class: "text-xs text-muted mb-3" },
+      "Identificador detectado: ",
+      h("strong", { style: "color:var(--text)" }, contract),
+      h("div", { style: "opacity:.7; margin-top:4px" },
+        `${sameContractCount} transação(ões) com este identificador serão atualizadas. Futuras importações com o mesmo número também serão rotuladas automaticamente.`)
+    ),
+    h("label", { class: "lbl", for: "ident-name" }, "Nome da empresa / serviço"),
+    h("input", { id: "ident-name", class: "input", placeholder: "Ex.: Cemig — Conta de luz" }),
+    h("label", { class: "lbl mt-2", for: "ident-cat" }, "Categoria"),
+    selectCategory(t.category_id && t.category_id !== "cat_other" ? t.category_id : "", null, "ident-cat")
+  );
+  openModal("🔍 Identificar débito automático", body, [{
+    label: "Salvar regra",
+    class: "btn-gradient",
+    onClick: () => {
+      const name = document.getElementById("ident-name").value.trim();
+      const cat = document.getElementById("ident-cat").value;
+      if (!name) return alert("Informe o nome da empresa / serviço.");
+      if (!cat) return alert("Escolha uma categoria.");
+      const keyword = contract || (t.description || "").trim();
+      if (!keyword) return alert("Não foi possível extrair um identificador desta transação.");
+      const r = Store.addRule({ keyword, category_id: cat, merchant_label: name });
+      closeModal();
+      alert(`✅ Regra salva.\n\n"${keyword}" → ${name}\n\nAplicada em ${r._applied || 0} transação(ões). Futuras importações também serão rotuladas.`);
+      navigate();
+    }
+  }]);
+  // foca o input quando o modal monta
+  setTimeout(() => document.getElementById("ident-name")?.focus(), 50);
+}
 
 function openNewTx() {
   const form = h("div", {},
@@ -2898,7 +2970,7 @@ function updateSearch(q) {
           onClick: () => { closeSearch(); location.hash = `#/transactions?q=${encodeURIComponent(q)}`; }},
           h("div", { class: "avatar", style: "width:28px; height:28px" }, cat?.icon || "📎"),
           h("div", { class: "grow" },
-            h("div", {}, t.description),
+            h("div", {}, displayLabel(t)),
             h("div", { class: "text-xs text-muted" }, `${t.date} • ${cat?.name || "—"}`)
           ),
           h("div", { class: "font-semi " + (t.amount > 0 ? "amt pos" : "amt neg") }, fmt(t.amount))
@@ -4181,7 +4253,7 @@ function showOcrPreview(txs, acc) {
       h("table", { class: "table" },
         h("thead", {}, h("tr", {}, h("th", {}, "Data"), h("th", {}, "Descrição"), h("th", {}, "Valor"))),
         h("tbody", {}, ...txs.map(t => h("tr", {},
-          h("td", {}, t.date), h("td", {}, t.description),
+          h("td", {}, t.date), h("td", {}, displayLabel(t)),
           h("td", { class: t.amount >= 0 ? "amt pos" : "amt neg" }, fmt(t.amount))
         )))
       )

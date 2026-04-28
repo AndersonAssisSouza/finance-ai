@@ -87,6 +87,20 @@ function autoCategorize(description) {
   return null;
 }
 
+/* Extrai um número de contrato/identificador de descrições opacas tipo
+ * "Debito automatico: '0080000355232'" ou "Pagamento conta: 12345678".
+ * Retorna a substring do número (>= 6 dígitos) ou null. */
+function extractContractNumber(description) {
+  const m = String(description || "").match(/(?:^|\D)['"]?(\d{6,})['"]?/);
+  return m ? m[1] : null;
+}
+
+/* Heurística: descrição opaca de débito automático sem nome do beneficiário. */
+function isOpaqueAutoDebit(description) {
+  const s = String(description || "");
+  return /d[eé]bito\s*autom[aá]tico|d[eé]b\.?\s*auto/i.test(s) && /\d{6,}/.test(s);
+}
+
 function emptyDb() {
   return {
     version: 3,
@@ -255,12 +269,25 @@ class FinanceStore {
   /* Types: income | expense | transfer */
   addTransaction({
     date, description, amount, account_id, card_id = null, category_id = null,
-    type, tags = [], notes = "", installments = 1, transfer_to_account = null
+    type, tags = [], notes = "", installments = 1, transfer_to_account = null,
+    merchant_label = null, merchant_category = null, receiver_document = null,
+    pluggy_category = null, external_id = null
   }) {
     date = date || today();
     description = (description || "").trim();
     amount = +amount;
     type = type || (amount >= 0 ? "income" : "expense");
+
+    // Aplica regras customizadas do usuário primeiro (podem definir category_id E merchant_label)
+    if (!category_id || !merchant_label) {
+      for (const r of (this.data.rules || [])) {
+        if (normalize(description).includes(normalize(r.keyword))) {
+          if (!category_id) category_id = r.category_id;
+          if (!merchant_label && r.merchant_label) merchant_label = r.merchant_label;
+          break;
+        }
+      }
+    }
 
     if (!category_id) {
       const autoId = autoCategorize(description);
@@ -302,7 +329,12 @@ class FinanceStore {
 
     const tx = {
       id: uid("tx_"), date, description, amount, account_id, card_id,
-      category_id, type, tags, notes, created_at: now()
+      category_id, type, tags, notes, created_at: now(),
+      ...(merchant_label ? { merchant_label } : {}),
+      ...(merchant_category ? { merchant_category } : {}),
+      ...(receiver_document ? { receiver_document } : {}),
+      ...(pluggy_category ? { pluggy_category } : {}),
+      ...(external_id ? { external_id } : {})
     };
     this.data.transactions.push(tx);
     this._save();
@@ -431,14 +463,20 @@ class FinanceStore {
 
   /* === RULES (auto-categorização personalizada) === */
   rules() { return this.data?.rules || []; }
-  addRule({ keyword, category_id }) {
-    const r = { id: uid("rule_"), keyword, category_id, created_at: now() };
+  addRule({ keyword, category_id, merchant_label = null }) {
+    const r = { id: uid("rule_"), keyword, category_id, merchant_label, created_at: now() };
     this.data.rules.push(r);
-    // aplicar retroativamente
+    // aplicar retroativamente — atualiza category_id e (se houver) merchant_label
+    let applied = 0;
     this.data.transactions.forEach(t => {
-      if (normalize(t.description).includes(normalize(keyword))) t.category_id = category_id;
+      if (normalize(t.description).includes(normalize(keyword))) {
+        t.category_id = category_id;
+        if (merchant_label) t.merchant_label = merchant_label;
+        applied++;
+      }
     });
     this._save();
+    r._applied = applied;
     return r;
   }
   deleteRule(id) { this.data.rules = this.data.rules.filter(r => r.id !== id); this._save(); }
